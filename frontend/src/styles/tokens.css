@@ -53,11 +53,19 @@
   --ink: #14202a;
   --ink-mute: #5b6b78;
 
-  /* Status */
+  /* Status. These are the drawing colours -- borders, rails, marks. */
   --st-done: #2f6b5e;
   --st-wip: #b8721c;
   --st-todo: #7c8b98;
   --st-blocked: #9b2c2c;
+
+  /* Text-only variants. The ochre and graphite above sit at 3.29:1 and 2.99:1
+     against --ground, below the 4.5:1 floor the accessibility section calls
+     non-negotiable. Darkened just far enough to clear it (5.12:1 and 5.21:1)
+     while staying in the same hue. `done` and `blocked` already pass, so they
+     are used unchanged and need no variant. */
+  --st-wip-ink: #8f5614;
+  --st-todo-ink: #556472;
 
   /* Derived. The grid is part of the drawing, so it sits between ground and
      rule in weight -- visible at rest, never competing with a node border. */

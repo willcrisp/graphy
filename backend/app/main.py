@@ -63,11 +63,22 @@ def _mount_static(app: FastAPI, settings: Settings) -> None:
     if (root / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
 
+    # Python's mimetypes registry has no woff2 entry on some platforms, and a
+    # font served as application/octet-stream is treated as an opaque download.
+    extra_types = {".woff2": "font/woff2", ".woff": "font/woff"}
+
     @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str) -> FileResponse:
+    async def spa(path: str):
+        # An unknown /api/* path is a client error, not a page. Falling through
+        # to index.html would hand a fetch() a 200 full of HTML.
+        if path.startswith("api/"):
+            return JSONResponse({"detail": "Not found."}, status_code=404)
+
         candidate = (root / path).resolve()
         if path and candidate.is_file() and candidate.is_relative_to(root):
-            return FileResponse(candidate)
+            return FileResponse(
+                candidate, media_type=extra_types.get(candidate.suffix.lower())
+            )
         return FileResponse(index)
 
     @app.exception_handler(StarletteHTTPException)
