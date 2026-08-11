@@ -41,6 +41,6 @@ ENV ROADMAP_DB_PATH=/data/blueprint.db \
 
 EXPOSE 8000
 
-# ROADMAP_SECRET_KEY and ROADMAP_ADMIN_PASSWORD_HASH are deliberately not set
+# ROADMAP_SECRET_KEY and ROADMAP_ADMIN_PASSWORD are deliberately not set
 # here -- the app refuses to start without them, which is the intended failure.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

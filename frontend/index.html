@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Blueprint</title>
+    <!-- Resolves the theme before first paint so a dark visitor never sees a
+         flash of the light board. Mirrors resolveTheme() in src/theme.ts; the
+         storage key is duplicated here on purpose, because this has to run
+         before any module loads. -->
+    <script>
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('blueprint.theme')
+          var dark =
+            stored === 'light' || stored === 'dark'
+              ? stored === 'dark'
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

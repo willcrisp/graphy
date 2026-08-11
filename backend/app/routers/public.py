@@ -14,17 +14,7 @@ router = APIRouter(prefix="/api", tags=["public"])
 
 @router.get("/apps", response_model=list[AppSummary])
 async def list_apps(session: SessionDep) -> list[AppSummary]:
-    return [
-        AppSummary(
-            id=app.id,
-            key=app.key,
-            name=app.name,
-            accent=app.accent,
-            sort_order=app.sort_order,
-            counts=counts,
-        )
-        for app, counts in await service.list_apps(session)
-    ]
+    return await service.app_summaries(session)
 
 
 @router.get("/apps/{key}/graph", response_model=GraphOut)

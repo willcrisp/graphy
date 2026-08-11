@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from argon2 import PasswordHasher
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +21,7 @@ ADMIN_PASSWORD = "correct horse battery staple"
 def make_settings(tmp_path: Path, **overrides) -> Settings:
     defaults = dict(
         secret_key="test-secret-key",
-        admin_password_hash=PasswordHasher().hash(ADMIN_PASSWORD),
+        admin_password=ADMIN_PASSWORD,
         db_path=tmp_path / "test.db",
         readonly=False,
         secure_cookies=False,
@@ -63,17 +62,6 @@ async def client(settings: Settings) -> AsyncIterator[AsyncClient]:
     http, app = build_client(settings)
     async with http, app.router.lifespan_context(app):  # type: ignore[attr-defined]
         yield http
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limiter() -> AsyncIterator[None]:
-    """The limiter is a module-level singleton; clear it so tests do not leak
-    failed-login counts into each other."""
-    from app.auth import login_limiter
-
-    login_limiter._hits.clear()
-    yield
-    login_limiter._hits.clear()
 
 
 @pytest.fixture

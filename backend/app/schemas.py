@@ -77,6 +77,29 @@ class GraphOut(BaseModel):
     _v_last_updated = field_validator("last_updated")(_as_utc)
 
 
+class BoardOut(BaseModel):
+    """Everything a mutation invalidates, returned by the mutation itself.
+
+    The client used to fire the mutation and then re-fetch `/graph` and `/apps`,
+    two serial round trips before anything could be redrawn. Mutating endpoints
+    return this instead so one trip is enough. `apps` rides along because the
+    per-app status counts in the title block change whenever a node does.
+    """
+
+    graph: GraphOut
+    apps: list[AppSummary]
+
+
+class NodeMutationOut(BoardOut):
+    """A board plus the node the caller just wrote, so it can be selected."""
+
+    node: NodeOut
+
+
+class EdgeMutationOut(BoardOut):
+    edge: EdgeOut
+
+
 class ConfigOut(BaseModel):
     readonly: bool
     authenticated: bool
@@ -86,6 +109,13 @@ def _title(value: str) -> str:
     cleaned = value.strip()
     if not cleaned:
         raise ValueError("Title must not be blank.")
+    return cleaned
+
+
+def _name(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("Name must not be blank.")
     return cleaned
 
 
@@ -112,6 +142,32 @@ class NodeUpdate(BaseModel):
 
     _v_title = field_validator("title")(lambda v: _title(v) if v is not None else None)
     _v_detail = field_validator("detail")(_detail)
+
+
+class AppCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    accent: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+    _v_name = field_validator("name")(_name)
+
+
+class AppUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+    _v_name = field_validator("name")(_name)
+
+
+class AppsOut(BaseModel):
+    """Every app with its counts. What the tab strip needs after an app-level
+    mutation -- unlike a node change, the active board may no longer exist."""
+
+    apps: list[AppSummary]
+
+
+class AppMutationOut(AppsOut):
+    """Apps plus the one just written, so the client can select it."""
+
+    app: AppOut
 
 
 class EdgeCreate(BaseModel):

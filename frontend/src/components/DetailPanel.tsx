@@ -3,28 +3,28 @@ import {
   STATUSES,
   STATUS_GLYPH,
   STATUS_LABEL,
-  type FeatureNodeData,
+  type TaskNodeData,
   type Status,
 } from '../types'
 
 export type SaveState = 'idle' | 'saving' | 'saved'
 
 interface Props {
-  feature: FeatureNodeData
+  task: TaskNodeData
   editable: boolean
   saveState: SaveState
   error: string | null
-  incoming: FeatureNodeData[]
-  outgoing: FeatureNodeData[]
+  incoming: TaskNodeData[]
+  outgoing: TaskNodeData[]
   onSave: (changes: { title?: string; detail?: string | null; status?: Status }) => void
   onDelete: () => void
   onDisconnect: (otherId: number, direction: 'in' | 'out') => void
   onClose: () => void
-  onSelectFeature: (id: number) => void
+  onSelectTask: (id: number) => void
 }
 
 export default function DetailPanel({
-  feature,
+  task,
   editable,
   saveState,
   error,
@@ -34,22 +34,22 @@ export default function DetailPanel({
   onDelete,
   onDisconnect,
   onClose,
-  onSelectFeature,
+  onSelectTask,
 }: Props) {
-  const [title, setTitle] = useState(feature.title)
-  const [detail, setDetail] = useState(feature.detail ?? '')
+  const [title, setTitle] = useState(task.title)
+  const [detail, setDetail] = useState(task.detail ?? '')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const panel = useRef<HTMLElement>(null)
 
-  // Re-seed the fields when a different feature is selected, and drop any
+  // Re-seed the fields when a different task is selected, and drop any
   // half-finished delete confirmation with it.
   useEffect(() => {
-    setTitle(feature.title)
-    setDetail(feature.detail ?? '')
+    setTitle(task.title)
+    setDetail(task.detail ?? '')
     setConfirmingDelete(false)
-  }, [feature.id, feature.title, feature.detail])
+  }, [task.id, task.title, task.detail])
 
-  const dirty = title.trim() !== feature.title || detail.trim() !== (feature.detail ?? '')
+  const dirty = title.trim() !== task.title || detail.trim() !== (task.detail ?? '')
 
   function save() {
     if (!dirty || !title.trim()) return
@@ -60,7 +60,7 @@ export default function DetailPanel({
     <aside
       ref={panel}
       className="panel"
-      aria-label={`Feature: ${feature.title}`}
+      aria-label={`Task: ${task.title}`}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation()
@@ -69,7 +69,7 @@ export default function DetailPanel({
       }}
     >
       <header className="panel__head">
-        <span className="panel__id mono">Feature {String(feature.id).padStart(3, '0')}</span>
+        <span className="panel__id mono">Task {String(task.id).padStart(3, '0')}</span>
         <button type="button" className="panel__close" onClick={onClose}>
           <span aria-hidden="true">×</span>
           <span className="visually-hidden">Close panel</span>
@@ -97,14 +97,14 @@ export default function DetailPanel({
                   <label
                     key={status}
                     className={`statuspick__option statuspick__option--${status}${
-                      feature.status === status ? ' statuspick__option--on' : ''
+                      task.status === status ? ' statuspick__option--on' : ''
                     }`}
                   >
                     <input
                       type="radio"
-                      name={`status-${feature.id}`}
+                      name={`status-${task.id}`}
                       value={status}
-                      checked={feature.status === status}
+                      checked={task.status === status}
                       onChange={() => onSave({ status })}
                       className="visually-hidden"
                     />
@@ -144,13 +144,13 @@ export default function DetailPanel({
           </>
         ) : (
           <>
-            <p className={`panel__status mono panel__status--${feature.status}`}>
-              <span aria-hidden="true">{STATUS_GLYPH[feature.status]}</span>
-              {STATUS_LABEL[feature.status]}
+            <p className={`panel__status mono panel__status--${task.status}`}>
+              <span aria-hidden="true">{STATUS_GLYPH[task.status]}</span>
+              {STATUS_LABEL[task.status]}
             </p>
-            <h2 className="panel__title">{feature.title}</h2>
-            {feature.detail ? (
-              <p className="panel__detail">{feature.detail}</p>
+            <h2 className="panel__title">{task.title}</h2>
+            {task.detail ? (
+              <p className="panel__detail">{task.detail}</p>
             ) : (
               <p className="panel__detail panel__detail--empty">No detail recorded.</p>
             )}
@@ -159,16 +159,16 @@ export default function DetailPanel({
 
         <Connections
           heading="Depends on"
-          features={incoming}
+          tasks={incoming}
           editable={editable}
-          onSelect={onSelectFeature}
+          onSelect={onSelectTask}
           onRemove={(id) => onDisconnect(id, 'in')}
         />
         <Connections
           heading="Leads to"
-          features={outgoing}
+          tasks={outgoing}
           editable={editable}
-          onSelect={onSelectFeature}
+          onSelect={onSelectTask}
           onRemove={(id) => onDisconnect(id, 'out')}
         />
 
@@ -183,12 +183,12 @@ export default function DetailPanel({
             {confirmingDelete ? (
               <>
                 <p className="panel__confirm">
-                  Delete “{feature.title}”? Its connections go with it. Features that
+                  Delete “{task.title}”? Its connections go with it. Tasks that
                   depended on it stay, unconnected.
                 </p>
                 <div className="panel__confirmrow">
                   <button type="button" className="button button--danger" onClick={onDelete}>
-                    Delete feature
+                    Delete task
                   </button>
                   <button
                     type="button"
@@ -205,7 +205,7 @@ export default function DetailPanel({
                 className="button button--quiet"
                 onClick={() => setConfirmingDelete(true)}
               >
-                Delete feature…
+                Delete task…
               </button>
             )}
           </div>
@@ -217,41 +217,41 @@ export default function DetailPanel({
 
 function Connections({
   heading,
-  features,
+  tasks,
   editable,
   onSelect,
   onRemove,
 }: {
   heading: string
-  features: FeatureNodeData[]
+  tasks: TaskNodeData[]
   editable: boolean
   onSelect: (id: number) => void
   onRemove: (id: number) => void
 }) {
-  if (!features.length) return null
+  if (!tasks.length) return null
   return (
     <section className="links">
       <h3 className="links__head mono">{heading}</h3>
       <ul className="links__list">
-        {features.map((feature) => (
-          <li key={feature.id} className="links__item">
+        {tasks.map((task) => (
+          <li key={task.id} className="links__item">
             <button
               type="button"
-              className={`links__link links__link--${feature.status}`}
-              onClick={() => onSelect(feature.id)}
+              className={`links__link links__link--${task.status}`}
+              onClick={() => onSelect(task.id)}
             >
-              <span aria-hidden="true">{STATUS_GLYPH[feature.status]}</span>
-              {feature.title}
+              <span aria-hidden="true">{STATUS_GLYPH[task.status]}</span>
+              {task.title}
             </button>
             {editable ? (
               <button
                 type="button"
                 className="links__cut"
-                onClick={() => onRemove(feature.id)}
-                title={`Disconnect ${feature.title}`}
+                onClick={() => onRemove(task.id)}
+                title={`Disconnect ${task.title}`}
               >
                 <span aria-hidden="true">×</span>
-                <span className="visually-hidden">Disconnect {feature.title}</span>
+                <span className="visually-hidden">Disconnect {task.title}</span>
               </button>
             ) : null}
           </li>

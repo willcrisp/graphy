@@ -76,7 +76,7 @@ async def test_missing_static_dir_is_a_config_error(tmp_path):
     previous = dict(os.environ)
     os.environ.update(
         ROADMAP_SECRET_KEY="k",
-        ROADMAP_ADMIN_PASSWORD_HASH="h",
+        ROADMAP_ADMIN_PASSWORD="pw",
         ROADMAP_STATIC_DIR=str(tmp_path / "nope"),
     )
     try:

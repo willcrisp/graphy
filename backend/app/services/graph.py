@@ -8,6 +8,7 @@ messages are written to be shown to a person, not parsed.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime
 
@@ -15,7 +16,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import App, Edge, Node
-from app.schemas import StatusCounts
+from app.schemas import AppSummary, BoardOut, GraphOut, StatusCounts
 
 
 class GraphError(Exception):
@@ -55,6 +56,13 @@ async def get_app(session: AsyncSession, key: str) -> App:
     return app
 
 
+async def get_app_by_id(session: AsyncSession, app_id: int) -> App:
+    app = await session.get(App, app_id)
+    if app is None:
+        raise NotFoundError(f"No app with id {app_id}.")
+    return app
+
+
 async def get_graph(
     session: AsyncSession, key: str
 ) -> tuple[App, list[Node], list[Edge], datetime | None]:
@@ -79,11 +87,103 @@ async def get_graph(
     return app, list(nodes), list(edges), last_updated
 
 
+async def app_summaries(session: AsyncSession) -> list[AppSummary]:
+    return [
+        AppSummary(
+            id=app.id,
+            key=app.key,
+            name=app.name,
+            accent=app.accent,
+            sort_order=app.sort_order,
+            counts=counts,
+        )
+        for app, counts in await list_apps(session)
+    ]
+
+
+async def get_board(session: AsyncSession, key: str) -> BoardOut:
+    """The whole redraw payload: one app's graph plus every app's counts."""
+    app, nodes, edges, last_updated = await get_graph(session, key)
+    return BoardOut(
+        graph=GraphOut(app=app, nodes=nodes, edges=edges, last_updated=last_updated),
+        apps=await app_summaries(session),
+    )
+
+
 async def get_node(session: AsyncSession, node_id: int) -> Node:
     node = await session.get(Node, node_id)
     if node is None:
         raise NotFoundError(f"No node with id {node_id}.")
     return node
+
+
+# --- app mutations ---------------------------------------------------------
+
+#: The seeded accents, reused in order for apps created through the UI. Each is
+#: chosen against the light ground; `--accent-draw` lightens it for dark.
+ACCENTS = ("#1F5F8B", "#5B4B8A", "#2F6B5E", "#8A4B2F", "#7A5C1E", "#6B2F5B")
+
+
+def _slug(name: str) -> str:
+    """A URL key from a display name. Keys never change after creation, so a
+    later rename leaves existing links working."""
+    cleaned = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return cleaned[:64] or "app"
+
+
+async def _free_key(session: AsyncSession, name: str) -> str:
+    base = _slug(name)
+    taken = set(
+        (await session.execute(select(App.key).where(App.key.like(f"{base}%"))))
+        .scalars()
+        .all()
+    )
+    if base not in taken:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in taken:
+        suffix += 1
+    return f"{base}-{suffix}"
+
+
+async def create_app(
+    session: AsyncSession, *, name: str, accent: str | None = None
+) -> App:
+    highest = await session.scalar(select(func.max(App.sort_order)))
+    count = await session.scalar(select(func.count()).select_from(App)) or 0
+    app = App(
+        key=await _free_key(session, name),
+        name=name,
+        accent=accent or ACCENTS[count % len(ACCENTS)],
+        sort_order=(highest or 0) + 1,
+    )
+    session.add(app)
+    await session.commit()
+    await session.refresh(app)
+    return app
+
+
+async def rename_app(session: AsyncSession, key: str, name: str) -> App:
+    app = await get_app(session, key)
+    app.name = name
+    await session.commit()
+    await session.refresh(app)
+    return app
+
+
+async def delete_app(session: AsyncSession, key: str) -> None:
+    """Delete an app and, by cascade, every task and connection on it.
+
+    The last app cannot be deleted: the board has no meaningful empty state, and
+    an accidental delete here is unrecoverable rather than merely annoying."""
+    app = await get_app(session, key)
+    remaining = await session.scalar(select(func.count()).select_from(App))
+    if (remaining or 0) <= 1:
+        raise GraphError(
+            f"{app.name!r} is the only app. Create another one before deleting it."
+        )
+    await session.delete(app)
+    await session.commit()
 
 
 # --- node mutations --------------------------------------------------------
@@ -119,12 +219,17 @@ async def update_node(
     return node
 
 
-async def delete_node(session: AsyncSession, node_id: int) -> None:
+async def delete_node(session: AsyncSession, node_id: int) -> App:
     """Delete a node. Its edges cascade; its children are NOT reparented and
-    simply become roots of the layout."""
+    simply become roots of the layout.
+
+    Returns the app it belonged to, which the caller needs to rebuild the board
+    once the node itself is gone."""
     node = await get_node(session, node_id)
+    app = await get_app_by_id(session, node.app_id)
     await session.delete(node)
     await session.commit()
+    return app
 
 
 # --- edge mutations --------------------------------------------------------
@@ -159,7 +264,7 @@ async def create_edge(
     session: AsyncSession, app: App, *, source_id: int, target_id: int
 ) -> Edge:
     if source_id == target_id:
-        raise GraphError("A feature cannot depend on itself.")
+        raise GraphError("A task cannot depend on itself.")
 
     source = await session.get(Node, source_id)
     target = await session.get(Node, target_id)
@@ -171,7 +276,7 @@ async def create_edge(
             raise NotFoundError(f"{label} node {node_id} does not exist.")
         if node.app_id != app.id:
             raise GraphError(
-                f"{label} feature belongs to a different app. "
+                f"{label} task belongs to a different app. "
                 "Connections cannot cross between apps."
             )
 
@@ -179,7 +284,7 @@ async def create_edge(
         select(Edge).where(Edge.source_id == source_id, Edge.target_id == target_id)
     )
     if existing is not None:
-        raise GraphError("Those two features are already connected.")
+        raise GraphError("Those two tasks are already connected.")
 
     # A new edge source -> target closes a loop exactly when target already
     # reaches source.
@@ -196,9 +301,11 @@ async def create_edge(
     return edge
 
 
-async def delete_edge(session: AsyncSession, edge_id: int) -> None:
+async def delete_edge(session: AsyncSession, edge_id: int) -> App:
     edge = await session.get(Edge, edge_id)
     if edge is None:
         raise NotFoundError(f"No connection with id {edge_id}.")
+    app = await get_app_by_id(session, edge.app_id)
     await session.execute(delete(Edge).where(Edge.id == edge_id))
     await session.commit()
+    return app

@@ -1,9 +1,12 @@
 import type {
   AppConfig,
+  AppMutation,
+  AppsPayload,
   AppSummary,
-  FeatureNodeData,
+  Board,
+  EdgeMutation,
   Graph,
-  GraphEdge,
+  NodeMutation,
   Status,
 } from './types'
 
@@ -76,24 +79,41 @@ export const login = (password: string) =>
 
 export const logout = () => request<void>('/auth/logout', { method: 'POST' })
 
+// Mutations return the whole board, not just the row they wrote. The client
+// patches optimistically and reconciles against this, so one round trip is
+// enough to get from a click to a correct redraw.
+
+// App-level mutations answer with the tab strip rather than a board: a delete
+// removes the board the caller was looking at, so there is nothing to redraw
+// until the client has picked a different app.
+
+export const createApp = (name: string) =>
+  request<AppMutation>('/apps', { method: 'POST', body: json({ name }) })
+
+export const renameApp = (key: string, name: string) =>
+  request<AppMutation>(`/apps/${key}`, { method: 'PATCH', body: json({ name }) })
+
+export const deleteApp = (key: string) =>
+  request<AppsPayload>(`/apps/${key}`, { method: 'DELETE' })
+
 export const createNode = (
   key: string,
   body: { title: string; detail?: string | null; status: Status },
-) => request<FeatureNodeData>(`/apps/${key}/nodes`, { method: 'POST', body: json(body) })
+) => request<NodeMutation>(`/apps/${key}/nodes`, { method: 'POST', body: json(body) })
 
 export const updateNode = (
   id: number,
   body: { title?: string; detail?: string | null; status?: Status },
-) => request<FeatureNodeData>(`/nodes/${id}`, { method: 'PATCH', body: json(body) })
+) => request<NodeMutation>(`/nodes/${id}`, { method: 'PATCH', body: json(body) })
 
 export const deleteNode = (id: number) =>
-  request<void>(`/nodes/${id}`, { method: 'DELETE' })
+  request<Board>(`/nodes/${id}`, { method: 'DELETE' })
 
 export const createEdge = (key: string, source_id: number, target_id: number) =>
-  request<GraphEdge>(`/apps/${key}/edges`, {
+  request<EdgeMutation>(`/apps/${key}/edges`, {
     method: 'POST',
     body: json({ source_id, target_id }),
   })
 
 export const deleteEdge = (id: number) =>
-  request<void>(`/edges/${id}`, { method: 'DELETE' })
+  request<Board>(`/edges/${id}`, { method: 'DELETE' })

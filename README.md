@@ -36,17 +36,8 @@ cd frontend && npm install
 
 ### 3. Create your `.env`
 
-The app **refuses to start** without a secret key and an admin password hash, and
-never invents a fallback. Generate both.
-
-First, the password hash — this prompts twice without echoing and prints an argon2
-hash. The plaintext is never written anywhere.
-
-```bash
-cd backend && uv run python scripts/hash_password.py
-```
-
-Then create `.env` in the repository root:
+The app **refuses to start** without a secret key and an admin password, and
+never invents a fallback. Create `.env` in the repository root:
 
 ```bash
 cp .env.example .env
@@ -56,8 +47,8 @@ Open it and fill in two values:
 
 - `ROADMAP_SECRET_KEY` — any long random string. Generate one with
   `python -c "import secrets; print(secrets.token_urlsafe(48))"`
-- `ROADMAP_ADMIN_PASSWORD_HASH` — the whole `$argon2id$...` string from above.
-  Quote it if your shell expands `$`.
+- `ROADMAP_ADMIN_PASSWORD` — the admin password, in plaintext. `.env` is
+  gitignored; treat it as the secret.
 
 > **Windows:** don't write `.env` with PowerShell's `Set-Content -Encoding utf8`.
 > It emits a BOM, which `python-dotenv` parses into the *name* of the first
@@ -132,14 +123,14 @@ Every variable is documented in [`.env.example`](.env.example).
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `ROADMAP_SECRET_KEY` | **yes** | — | Signs the session cookie. Changing it signs the admin out. |
-| `ROADMAP_ADMIN_PASSWORD_HASH` | **yes** | — | Argon2 hash of the admin password. Never a plaintext password. |
+| `ROADMAP_ADMIN_PASSWORD` | **yes** | — | The admin password, in plaintext. |
 | `ROADMAP_DB_PATH` | no | `./blueprint.db` | SQLite file. Relative paths resolve against the working directory. |
 | `ROADMAP_READONLY` | no | `false` | Global kill switch — see below. |
 | `ROADMAP_SECURE_COOKIES` | no | `false` | Set `true` when serving over HTTPS. |
 | `ROADMAP_STATIC_DIR` | no | unset | Directory of the built frontend. Set in production, leave unset in dev. |
 
-> `ROADMAP_ADMIN_PASSWORD_HASH` is required even when `ROADMAP_READONLY=true`. A
-> purely public deployment still needs a hash it will never use — generate a
+> `ROADMAP_ADMIN_PASSWORD` is required even when `ROADMAP_READONLY=true`. A
+> purely public deployment still needs a password it will never use — set a
 > throwaway one.
 
 ### Publishing read-only
@@ -231,9 +222,6 @@ POST   /api/apps/{key}/edges    {source_id, target_id} -> edge
 DELETE /api/edges/{id}          -> 204
 ```
 
-Login is rate-limited to 5 attempts per IP per 15 minutes, in memory. A wrong
-password and a locked-out IP return an identical response, so neither can be probed.
-
 ## Repository layout
 
 ```
@@ -244,14 +232,15 @@ backend/
     db.py         engine, session factory, FK pragma
     models.py     four tables: app, node, edge, meta
     schemas.py    pydantic; status enum enforced here
-    auth.py       session cookie, argon2, rate limiter, guards
+    auth.py       session cookie, password check, guards
     services/     graph invariants -- cycle check lives here
     routers/      public / auth / admin
-  scripts/        seed.py, hash_password.py
+  scripts/        seed.py
   tests/
 frontend/
   src/
     layout.ts     dagre wrapper; node dimensions computed, not measured
+    theme.ts      light/dark resolution and persistence
     api.ts        typed client, flattens server errors to one sentence
     components/   Graph, FeatureNode, AppTabs, DetailPanel, TitleBlock, ...
     styles/       tokens.css (design tokens), app.css
@@ -273,6 +262,13 @@ decisions and the conventions that will bite you.
   make layout asynchronous and janky.
 - **Every mutation refetches the graph.** At tens of nodes per app this is
   imperceptible and much simpler than optimistic patching.
+- **The board follows your OS light/dark setting**, and the toggle in the top right
+  overrides it for good (kept in `localStorage`). The theme is resolved before first
+  paint, so there is no flash of the light board on a dark desktop. Dark is a full
+  re-pick of the palette rather than an inversion: the four status hues are chosen
+  again against the dark ground, where the light ones drop as low as 1.6:1, and each
+  per-app accent is mixed toward white for drawing while the stored hex is left
+  alone.
 
 ### Two deliberate deviations from the design spec
 
@@ -283,4 +279,6 @@ decisions and the conventions that will bite you.
 - **`--st-wip` and `--st-todo` have darkened text-only variants.** As specified they
   sit at 3.29:1 and 2.99:1 against `--ground`, below the 4.5:1 contrast floor. The
   specified hues are still used for borders, rails and marks; only text uses
-  `--st-wip-ink` (5.12:1) and `--st-todo-ink` (5.21:1).
+  `--st-wip-ink` (5.12:1) and `--st-todo-ink` (5.21:1). In dark the status hues are
+  re-picked and all four clear the floor as drawn (5.9, 8.1, 5.6, 5.3 against
+  `--ground`), so the `-ink` tokens there are aliases.

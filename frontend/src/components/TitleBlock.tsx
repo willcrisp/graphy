@@ -29,7 +29,7 @@ export default function TitleBlock({ app, counts, lastUpdated }: Props) {
       style={{ '--accent': app.accent } as React.CSSProperties}
     >
       <figcaption className="visually-hidden">
-        {app.name}: {total} features. {STATUSES.map((s) => `${counts[s]} ${STATUS_LABEL[s]}`).join(', ')}.
+        {app.name}: {total} tasks. {STATUSES.map((s) => `${counts[s]} ${STATUS_LABEL[s]}`).join(', ')}.
         Last updated {formatDate(lastUpdated)}.
       </figcaption>
 
@@ -39,7 +39,7 @@ export default function TitleBlock({ app, counts, lastUpdated }: Props) {
           <span className="titleblock__value titleblock__value--display">{app.name}</span>
         </div>
         <div className="titleblock__cell titleblock__cell--total">
-          <span className="titleblock__key mono">Features</span>
+          <span className="titleblock__key mono">Tasks</span>
           <span className="titleblock__value mono titleblock__value--total">{total}</span>
         </div>
       </div>

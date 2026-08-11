@@ -19,9 +19,6 @@ uv run pytest -k cycle                                        # by name
 # Backend: seed six apps (--reset drops every app first)
 uv run --env-file ../.env python scripts/seed.py
 uv run --env-file ../.env python scripts/seed.py --reset
-
-# Backend: generate a hash for ROADMAP_ADMIN_PASSWORD_HASH
-uv run python scripts/hash_password.py
 ```
 
 ```bash
@@ -92,11 +89,53 @@ Nodes are fed to dagre in `sort_order`-then-`id` order and edges in `id` order,
 because dagre's output depends on insertion order and layout stability across
 reloads is a tested requirement.
 
-### Every mutation refetches the whole graph
+### The theme is one attribute on `<html>`
 
-`runMutation` in `App.tsx` calls the API, then `refresh()` re-fetches both the graph
-and the app list (for the title-block counts). There is no optimistic patching. At
-tens of nodes per app this is imperceptible and much simpler.
+`data-theme` is `light` or `dark`, never absent. It is written twice: by the inline
+script in `frontend/index.html` **before first paint** (so a dark visitor never sees
+the light board flash), and thereafter by `applyTheme` in `theme.ts`. Because the
+attribute is always explicit, `tokens.css` has a single `:root[data-theme='dark']`
+block rather than a copy of it under `prefers-color-scheme`.
+
+`resolveTheme(stored, prefersDark)` is the only rule — an explicit choice beats the
+OS, anything else follows the OS — and it is pure so `theme.test.ts` can cover it
+without a DOM. The storage key `blueprint.theme` is duplicated as a literal in
+`index.html`, because that script has to run before any module loads. Change both.
+
+Only colour changes between themes. Every rule weight, size and space is shared,
+because status is carried by the drawing convention (hairline vs heavy, dashed for
+`wip`), not by fill.
+
+### Every mutation is applied twice: locally, then from the response
+
+`runMutation` in `App.tsx` patches the graph optimistically so the board redraws on
+the click, fires the request, and then replaces the graph outright with what comes
+back. On failure it restores the snapshot it took first.
+
+This costs one round trip, not two: **every mutating endpoint returns the whole
+board** — `{graph, apps}`, plus the row it wrote — so there is nothing left to
+re-fetch. `apps` rides along because the title-block counts move whenever a node
+does. That is why none of the deletes are 204.
+
+The local half lives in `frontend/src/optimistic.ts`, deliberately pure and
+separately tested. **Those functions must mirror `services/graph.py`, not guess at
+it** — deleting a node cascades its edges and does not reparent its children, and a
+divergence shows up as the board visibly changing twice, once on the click and again
+on reconcile.
+
+Rows that exist only on the client carry a **negative id** (`tempId()`). Real ids are
+SQLite rowids and always positive, so a temp id that leaks to the API gets an obvious
+404 rather than silently editing row 1. Selection follows a temp id to its real one
+in `onReconciled`, in the same batch as the reconcile, or the panel blanks for a
+frame.
+
+Rollback is not an edge case here. Rejecting a cycle or a duplicate connection is a
+normal outcome, so those edges have to appear on the click and then disappear with
+the server's sentence. Only the newest in-flight mutation may roll back — an older
+one restoring its snapshot would undo a newer pending patch.
+
+App-level mutations (create/rename/delete app) deliberately bypass all of this: they
+create and destroy whole boards, so there is no single board to patch or roll back.
 
 ### SQLite foreign keys
 
@@ -120,6 +159,19 @@ variants used for **text only**, because the drawing colours fall below the 4.5:
 contrast floor against `--ground`. Using the wrong one for text reintroduces an
 accessibility failure. `done` and `blocked` pass as-is and have no variant.
 
+In dark the four drawing colours are re-picked (the light ones sit as low as 1.6:1
+on the dark ground) and all four clear 4.5:1 as drawn, so there the `-ink` tokens are
+aliases of the drawing colours. Keep painting text with `-ink` regardless — callers
+must not have to know which theme is up. If you retune any status hue, re-check it
+against **both** `--ground` and `--surface` in **both** themes.
+
+**Never paint with `--accent` or `--tab-accent` directly — use `--accent-draw` /
+`--tab-accent-draw`.** The accent is one stored hex per app, chosen against the light
+ground and injected as an inline custom property; the drawn tokens mix it toward
+white in dark. They are re-derived on `:root`, `.canvas` and `.tab` separately
+because `var()` substitution happens where the declaration sits, so a single
+derivation at `:root` would freeze every descendant to the root's accent.
+
 **Borders are 2px, not 1.5px.** Chrome floors a 1.5px border to 1px at
 `devicePixelRatio: 1`, which erases the hairline-versus-heavy distinction the status
 convention depends on. `todo` is the only 1px status.
@@ -134,13 +186,19 @@ framework. Styling is hand-written CSS with custom properties.
 
 ## Environment
 
-Required: `ROADMAP_SECRET_KEY`, `ROADMAP_ADMIN_PASSWORD_HASH` (argon2 hash, never
-plaintext). The app refuses to start without them and names the missing one — it
+Required: `ROADMAP_SECRET_KEY`, `ROADMAP_ADMIN_PASSWORD` (plaintext; the `.env`
+file is the trust boundary). The app refuses to start without them and names the missing one — it
 never generates a fallback secret. Optional: `ROADMAP_DB_PATH`, `ROADMAP_READONLY`,
 `ROADMAP_SECURE_COOKIES`, `ROADMAP_STATIC_DIR`. All documented in `.env.example`.
 
 Set `ROADMAP_STATIC_DIR` to `frontend/dist` for production single-port serving; leave
 it unset in development so the Vite proxy handles `/api`.
+
+Uvicorn reads `--env-file` **once, at process start**. Editing `.env` and relying
+on `--reload` does nothing — reload re-imports code, not the environment. Restart
+the backend after any `.env` change. `scripts/dev.ps1` frees ports 8000 and 5173
+before binding them, so `just run dev` is always a real restart; without that a
+survivor of a missed Ctrl+C keeps the port and the new process exits silently.
 
 **On Windows, do not write `.env` with PowerShell's `Set-Content -Encoding utf8`** —
 it emits a BOM that `python-dotenv` parses into the *name* of the first variable, so
@@ -152,6 +210,3 @@ the app reports that variable as missing.
 SQLite file, so you can seed through `session` and read the result through `client`
 in one test. Helpers `make_app`, `make_node`, `make_edge` insert directly; the `admin`
 fixture returns a client carrying a valid session cookie.
-
-The login rate limiter is a module-level singleton, so an autouse fixture clears it
-between tests. Anything new touching `login_limiter` must account for that.

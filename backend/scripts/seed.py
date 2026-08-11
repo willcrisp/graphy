@@ -1,4 +1,4 @@
-"""Populate the database with six apps and realistic feature trees.
+"""Populate the database with six apps and realistic task trees.
 
     uv run python scripts/seed.py [--reset]
 

@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-REQUIRED = ("ROADMAP_SECRET_KEY", "ROADMAP_ADMIN_PASSWORD_HASH")
+REQUIRED = ("ROADMAP_SECRET_KEY", "ROADMAP_ADMIN_PASSWORD")
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
@@ -38,7 +38,7 @@ def _flag(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     secret_key: str
-    admin_password_hash: str
+    admin_password: str
     db_path: Path
     readonly: bool
     secure_cookies: bool
@@ -56,8 +56,7 @@ def load_settings() -> Settings:
         raise ConfigError(
             "Missing required environment variable(s): "
             + ", ".join(missing)
-            + ". See .env.example. Generate a password hash with "
-            "`python scripts/hash_password.py`."
+            + ". See .env.example."
         )
 
     db_path = Path(os.environ.get("ROADMAP_DB_PATH", "./blueprint.db")).expanduser()
@@ -74,7 +73,7 @@ def load_settings() -> Settings:
 
     return Settings(
         secret_key=os.environ["ROADMAP_SECRET_KEY"].strip(),
-        admin_password_hash=os.environ["ROADMAP_ADMIN_PASSWORD_HASH"].strip(),
+        admin_password=os.environ["ROADMAP_ADMIN_PASSWORD"],
         db_path=db_path,
         readonly=_flag("ROADMAP_READONLY"),
         secure_cookies=_flag("ROADMAP_SECURE_COOKIES"),

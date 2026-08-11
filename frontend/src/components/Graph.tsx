@@ -11,11 +11,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import FeatureNode from './FeatureNode'
+import TaskNode from './TaskNode'
 import { NODE_WIDTH, layoutGraph } from '../layout'
 import type { Graph as GraphData } from '../types'
 
-const nodeTypes = { feature: FeatureNode }
+const nodeTypes = { task: TaskNode }
 const fitViewOptions = { padding: 0.2 }
 
 interface Props {
@@ -25,6 +25,11 @@ interface Props {
   onSelect: (id: number | null) => void
   onConnect: (source: number, target: number) => void
   onAddFirst: () => void
+  /** Right-click targets. Coordinates are viewport (client) pixels; the menu
+   *  renders at the shell level so it is never clipped by the canvas. */
+  onNodeMenu: (id: number, x: number, y: number) => void
+  onEdgeMenu: (id: number, x: number, y: number) => void
+  onPaneMenu: (x: number, y: number) => void
 }
 
 export default function Graph({
@@ -34,24 +39,27 @@ export default function Graph({
   onSelect,
   onConnect,
   onAddFirst,
+  onNodeMenu,
+  onEdgeMenu,
+  onPaneMenu,
 }: Props) {
   const { fitView } = useReactFlow()
 
   const { nodes, edges } = useMemo(() => {
     const positions = layoutGraph(graph.nodes, graph.edges)
-    const flowNodes: Node[] = graph.nodes.flatMap((feature) => {
-      const position = positions.get(feature.id)
+    const flowNodes: Node[] = graph.nodes.flatMap((task) => {
+      const position = positions.get(task.id)
       if (!position) return []
       return [
         {
-          id: String(feature.id),
-          type: 'feature',
+          id: String(task.id),
+          type: 'task',
           position: { x: position.x, y: position.y },
           width: NODE_WIDTH,
           height: position.height,
-          selected: feature.id === selectedId,
-          data: { feature, editable: editMode, rank: position.rank },
-          ariaLabel: `${feature.title}, ${feature.status}`,
+          selected: task.id === selectedId,
+          data: { task, editable: editMode, rank: position.rank },
+          ariaLabel: `${task.title}, ${task.status}`,
         },
       ]
     })
@@ -82,12 +90,12 @@ export default function Graph({
         </p>
         <p className="empty__text">
           {editMode
-            ? 'Nothing planned here yet. Add the first feature.'
+            ? 'Nothing planned here yet. Add the first task.'
             : 'Nothing planned here yet.'}
         </p>
         {editMode ? (
           <button type="button" className="button button--primary" onClick={onAddFirst}>
-            Add the first feature
+            Add the first task
           </button>
         ) : null}
       </div>
@@ -110,6 +118,20 @@ export default function Graph({
       proOptions={{ hideAttribution: false }}
       onNodeClick={(_event, node) => onSelect(Number(node.id))}
       onPaneClick={() => onSelect(null)}
+      onNodeContextMenu={(event, node) => {
+        event.preventDefault()
+        onNodeMenu(Number(node.id), event.clientX, event.clientY)
+      }}
+      onEdgeContextMenu={(event, edge) => {
+        event.preventDefault()
+        onEdgeMenu(Number(edge.id), event.clientX, event.clientY)
+      }}
+      onPaneContextMenu={(event) => {
+        // Touch devices fire this with a TouchEvent, which has no clientX.
+        if (!('clientX' in event)) return
+        event.preventDefault()
+        onPaneMenu(event.clientX, event.clientY)
+      }}
       onConnect={(connection: Connection) => {
         if (connection.source && connection.target) {
           onConnect(Number(connection.source), Number(connection.target))

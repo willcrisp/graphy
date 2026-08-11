@@ -1,17 +1,14 @@
 """Single-admin session auth.
 
-The password is only ever present as an argon2 hash in the environment. The
-session cookie carries no identity beyond "this browser signed in at time T" —
-there is one admin, so there is nothing else to carry.
+The admin password is a plaintext value in the environment, compared with a
+constant-time equality check. The session cookie carries no identity beyond
+"this browser signed in at time T" — there is one admin, so there is nothing else to carry.
 """
 
 from __future__ import annotations
 
-import time
-from collections import defaultdict
+import secrets
 
-from argon2 import PasswordHasher
-from argon2.exceptions import Argon2Error
 from fastapi import HTTPException, Request, Response, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -23,10 +20,6 @@ SESSION_MAX_AGE = 30 * 24 * 60 * 60  # 30 days, in seconds
 _SALT = "blueprint-session-v1"
 _PAYLOAD = "admin"
 
-_hasher = PasswordHasher()
-
-# Deliberately identical for a wrong password and for a locked-out IP, so the
-# response body cannot be used to probe either.
 GENERIC_LOGIN_FAILURE = "Sign-in failed. Check the password and try again."
 
 
@@ -35,10 +28,7 @@ def _serializer(settings: Settings) -> URLSafeTimedSerializer:
 
 
 def verify_password(password: str, settings: Settings) -> bool:
-    try:
-        return _hasher.verify(settings.admin_password_hash, password)
-    except (Argon2Error, ValueError):
-        return False
+    return secrets.compare_digest(password, settings.admin_password)
 
 
 def is_authenticated(request: Request, settings: Settings) -> bool:
@@ -72,39 +62,6 @@ def clear_session(response: Response, settings: Settings) -> None:
         secure=settings.secure_cookies,
         path="/",
     )
-
-
-class RateLimiter:
-    """Fixed-window, in-memory, per-IP. Resets on restart, which is acceptable
-    for a single-admin app and avoids dragging in Redis."""
-
-    def __init__(self, limit: int = 5, window_seconds: int = 15 * 60) -> None:
-        self.limit = limit
-        self.window = window_seconds
-        self._hits: dict[str, list[float]] = defaultdict(list)
-
-    def _recent(self, key: str, now: float) -> list[float]:
-        fresh = [t for t in self._hits[key] if now - t < self.window]
-        self._hits[key] = fresh
-        return fresh
-
-    def allowed(self, key: str) -> bool:
-        return len(self._recent(key, time.monotonic())) < self.limit
-
-    def record_failure(self, key: str) -> None:
-        now = time.monotonic()
-        self._recent(key, now)
-        self._hits[key].append(now)
-
-    def reset(self, key: str) -> None:
-        self._hits.pop(key, None)
-
-
-login_limiter = RateLimiter()
-
-
-def client_key(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
 
 
 # --- dependencies ----------------------------------------------------------

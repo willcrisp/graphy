@@ -1,15 +1,18 @@
-"""Authentication, rate limiting, and the two layers of the read-only switch."""
+"""Authentication and the two layers of the read-only switch."""
 
 from __future__ import annotations
 
 import pytest
 
-from app.auth import COOKIE_NAME, login_limiter
+from app.auth import COOKIE_NAME
 from app.config import Settings
 from tests.conftest import ADMIN_PASSWORD, build_client, make_app, make_node
 
 # (method, path template) for every mutating endpoint in the contract.
 MUTATIONS = [
+    ("POST", "/api/apps", {"name": "New app"}),
+    ("PATCH", "/api/apps/alpha", {"name": "Renamed"}),
+    ("DELETE", "/api/apps/alpha", None),
     ("POST", "/api/apps/alpha/nodes", {"title": "X", "status": "todo"}),
     ("PATCH", "/api/nodes/{node}", {"title": "Y"}),
     ("DELETE", "/api/nodes/{node}", None),
@@ -76,36 +79,6 @@ async def test_cookie_signed_with_another_secret_is_rejected(tmp_path, client):
     forged = URLSafeTimedSerializer("a-different-secret", salt="blueprint-session-v1")
     client.cookies.set(COOKIE_NAME, forged.dumps("admin"))
     assert (await client.get("/api/config")).json()["authenticated"] is False
-
-
-# --- rate limiting ----------------------------------------------------------
-
-
-async def test_login_is_rate_limited_after_five_failures(client):
-    for _ in range(5):
-        assert (
-            await client.post("/api/auth/login", json={"password": "wrong"})
-        ).status_code == 401
-
-    # The sixth attempt is refused even though the password is now correct, and
-    # the body is identical to a wrong-password response.
-    locked = await client.post("/api/auth/login", json={"password": ADMIN_PASSWORD})
-    assert locked.status_code == 401
-    assert locked.json()["detail"] == "Sign-in failed. Check the password and try again."
-
-
-async def test_successful_login_resets_the_counter(client):
-    for _ in range(4):
-        await client.post("/api/auth/login", json={"password": "wrong"})
-    assert (
-        await client.post("/api/auth/login", json={"password": ADMIN_PASSWORD})
-    ).status_code == 204
-
-    login_limiter.reset("testclient")
-    for _ in range(4):
-        assert (
-            await client.post("/api/auth/login", json={"password": "wrong"})
-        ).status_code == 401
 
 
 # --- layer 2: no session ----------------------------------------------------

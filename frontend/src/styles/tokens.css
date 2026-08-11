@@ -46,12 +46,15 @@
 }
 
 :root {
+  color-scheme: light;
+
   /* Surface */
   --ground: #e9eef2;
   --surface: #fbfcfd;
   --rule: #c3d0da;
   --ink: #14202a;
   --ink-mute: #5b6b78;
+  --ink-strong: #23323f; /* the one step past --ink: primary button hover */
 
   /* Status. These are the drawing colours -- borders, rails, marks. */
   --st-done: #2f6b5e;
@@ -67,11 +70,20 @@
   --st-wip-ink: #8f5614;
   --st-todo-ink: #556472;
 
+  /* Destructive surfaces, derived from --st-blocked. */
+  --danger-ink: #ffffff; /* text drawn on top of a --st-blocked fill */
+  --danger-hover: #7f2424;
+  --danger-wash: #fbeceb;
+  --danger-text: #6d1f1f;
+
+  --scrim: rgba(20, 32, 42, 0.35);
+
   /* Derived. The grid is part of the drawing, so it sits between ground and
      rule in weight -- visible at rest, never competing with a node border. */
   --grid: #d3dde4;
   --rule-strong: #9fb1bf;
   --accent: var(--st-todo); /* per-app, overridden on .canvas by inline style */
+  --tab-accent: var(--st-todo); /* per-app, overridden on .tab by inline style */
 
   /* Type */
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
@@ -97,6 +109,74 @@
   --panel-w: 360px;
   --motion: 240ms;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* --- dark ---------------------------------------------------------------
+   The negative of a blueprint: the same drawing, inked on a dark drafting
+   ground. Only colour changes -- every rule weight, size and space above is
+   shared, because the drawing convention (hairline vs heavy border, dashed
+   for wip) is what carries status, not the fill.
+
+   `data-theme` is written to <html> before first paint by the inline script in
+   index.html and thereafter by applyTheme() in theme.ts. It is always present
+   and always explicit, so there is exactly one dark block here rather than a
+   duplicate under a prefers-color-scheme query. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ground: #10171d;
+  --surface: #18222b;
+  --rule: #2c3a46;
+  --ink: #dce6ec; /* 14.3:1 on --ground */
+  --ink-mute: #93a5b2; /* 7.1:1 on --ground, 6.3:1 on --surface */
+  --ink-strong: #f2f7fa;
+
+  /* The light drawing colours are far too dark to read against this ground --
+     --st-blocked lands at 1.6:1 -- so each is re-picked at the same hue and
+     re-checked against the 4.5:1 floor rather than being reused. */
+  --st-done: #3fa38b; /* 5.9:1 */
+  --st-wip: #e0a24a; /* 8.1:1 */
+  --st-todo: #7f92a1; /* 5.6:1 */
+  --st-blocked: #e0645f; /* 5.3:1 */
+
+  /* All four clear the floor as drawn here (and on --surface: 5.2, 7.2, 5.0,
+     4.8), so unlike the light theme no separate text variant is needed. They
+     stay as tokens so callers do not have to know which theme is up. */
+  --st-wip-ink: var(--st-wip);
+  --st-todo-ink: var(--st-todo);
+
+  --danger-ink: #131a20; /* 5.2:1 on a --st-blocked fill; white would be 3.4:1 */
+  --danger-hover: #ea817c;
+  --danger-wash: #2a1a1a;
+  --danger-text: #f0a29e; /* 8.2:1 on --danger-wash */
+
+  --scrim: rgba(3, 7, 10, 0.62);
+
+  --grid: #1c2731;
+  --rule-strong: #4c6070;
+}
+
+/* --- per-app accent ------------------------------------------------------
+   The accent is one stored hex per app, chosen against the light ground and
+   handed to the DOM as an inline custom property. On the dark ground those
+   hexes go muddy, so what gets drawn is mixed toward white. Everything paints
+   with the *-draw tokens; --accent and --tab-accent stay the stored value.
+
+   Both are re-derived on each element that carries the inline property:
+   substitution happens where the declaration sits, so a single derivation at
+   :root would be frozen to the root's accent for every descendant. */
+:root,
+.canvas,
+.tab {
+  --accent-draw: var(--accent);
+  --tab-accent-draw: var(--tab-accent);
+}
+
+:root[data-theme='dark'],
+[data-theme='dark'] .canvas,
+[data-theme='dark'] .tab {
+  --accent-draw: color-mix(in srgb, var(--accent), #fff 45%);
+  --tab-accent-draw: color-mix(in srgb, var(--tab-accent), #fff 45%);
 }
 
 @media (prefers-reduced-motion: reduce) {

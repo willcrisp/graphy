@@ -120,7 +120,7 @@ async def test_every_valid_status_accepted(admin, session, status):
         "/api/apps/alpha/nodes", json={"title": f"Node {status}", "status": status}
     )
     assert response.status_code == 201, response.text
-    assert response.json()["status"] == status
+    assert response.json()["node"]["status"] == status
 
 
 async def test_blank_title_rejected(admin, session):

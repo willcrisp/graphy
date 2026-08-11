@@ -36,7 +36,17 @@ export interface AppSummary extends AppInfo {
   counts: StatusCounts
 }
 
-export interface FeatureNodeData {
+/** App-level mutations answer with the whole strip: after a delete the active
+ *  board may be gone, so the client cannot patch a single entry. */
+export interface AppsPayload {
+  apps: AppSummary[]
+}
+
+export interface AppMutation extends AppsPayload {
+  app: AppInfo
+}
+
+export interface TaskNodeData {
   id: number
   app_id: number
   title: string
@@ -56,9 +66,24 @@ export interface GraphEdge {
 
 export interface Graph {
   app: AppInfo
-  nodes: FeatureNodeData[]
+  nodes: TaskNodeData[]
   edges: GraphEdge[]
   last_updated: string | null
+}
+
+/** What every mutating endpoint returns: enough to redraw without a re-fetch.
+ *  `apps` rides along because the tab counts move whenever a node does. */
+export interface Board {
+  graph: Graph
+  apps: AppSummary[]
+}
+
+export interface NodeMutation extends Board {
+  node: TaskNodeData
+}
+
+export interface EdgeMutation extends Board {
+  edge: GraphEdge
 }
 
 export interface AppConfig {
