@@ -131,7 +131,7 @@ export default function App() {
   }, [activeKey, loadGraph])
 
   const runMutation = useCallback(
-    async (action: () => Promise<unknown>, options?: { keepSelection?: boolean }) => {
+    async (action: () => Promise<unknown>) => {
       setPanelError(null)
       setSaveState('saving')
       try {
@@ -139,7 +139,6 @@ export default function App() {
         await refresh()
         setSaveState('saved')
         window.setTimeout(() => setSaveState('idle'), 1600)
-        if (!options?.keepSelection) setSelectedId((current) => current)
         return true
       } catch (error) {
         setSaveState('idle')
@@ -220,7 +219,7 @@ export default function App() {
     status?: Status
   }) {
     if (!selected) return
-    void runMutation(() => api.updateNode(selected.id, changes), { keepSelection: true })
+    void runMutation(() => api.updateNode(selected.id, changes))
   }
 
   async function removeSelected() {
@@ -232,9 +231,7 @@ export default function App() {
   function connect(source: number, target: number) {
     if (!activeKey) return
     setSelectedId(target)
-    void runMutation(() => api.createEdge(activeKey, source, target), {
-      keepSelection: true,
-    })
+    void runMutation(() => api.createEdge(activeKey, source, target))
   }
 
   function disconnect(otherId: number, direction: 'in' | 'out') {
@@ -245,7 +242,7 @@ export default function App() {
         : candidate.source_id === selectedId && candidate.target_id === otherId,
     )
     if (!edge) return
-    void runMutation(() => api.deleteEdge(edge.id), { keepSelection: true })
+    void runMutation(() => api.deleteEdge(edge.id))
   }
 
   // --- render -------------------------------------------------------------
