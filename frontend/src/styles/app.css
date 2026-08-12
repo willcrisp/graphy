@@ -314,17 +314,6 @@
   background: var(--ground);
 }
 
-.canvas .react-flow__edge-path {
-  stroke: var(--rule-strong);
-  stroke-width: 1.25;
-}
-
-.canvas .react-flow__edge.selected .react-flow__edge-path,
-.canvas .react-flow__edge:focus-visible .react-flow__edge-path {
-  stroke: var(--ink);
-  stroke-width: 2;
-}
-
 .canvas .react-flow__edge:focus {
   outline: none;
 }
@@ -337,27 +326,31 @@
 
 /* --- task node --------------------------------------------------------- */
 
+/* A node is a glyph-and-label pill: borderless, transparent, and sized to the
+   box layout.ts reserved for it. */
 .task {
   position: relative;
   display: flex;
-  width: 260px;
+  width: 100%;
   /* Fill the box layout.ts reserved, so the drawn node and the computed layout
      cannot drift apart if the type metrics shift by a pixel or two. */
   height: 100%;
-  min-height: 62px;
-  background: var(--surface);
-  border: 1px solid var(--st-todo);
-  border-radius: var(--radius);
+  align-items: center;
+  background: transparent;
+  border: 0;
   overflow: hidden;
+  /* Width of the status glyph's slot. Fixed rather than intrinsic because
+     .task__body's padding has to cancel it exactly -- see the centring note
+     there. */
+  --glyph-slot: 13px;
   animation: task-settle var(--motion) var(--ease) both;
   animation-delay: var(--stagger, 0ms);
-  transition: border-color var(--motion) var(--ease);
 }
 
 @keyframes task-settle {
   from {
     opacity: 0;
-    transform: translateX(-6px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
@@ -365,95 +358,132 @@
   }
 }
 
-/* The 4px accent rail identifies the app the sheet belongs to. */
-.task__rail {
-  flex: 0 0 4px;
-  background: var(--accent-draw);
-}
+/* Edges have to leave from the centre of the *label*, not the centre of the
+   label-plus-glyph group. React Flow anchors edge paths to the handles, and
+   the handles sit at the centre of the box layout.ts reserved -- so the
+   title's centre has to coincide with the box's.
 
-.task__body {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: var(--s2) var(--s3) var(--s3);
-}
+   Centring the row and then padding the right by exactly the width the glyph
+   occupies on the left is what does it: the padding cancels the glyph, so
+   the title lands dead centre. Worth the arithmetic because it holds for any
+   title width *and* any error in nodeWidth's estimate -- with content
+   box W - (g + gap), the group (g + gap + T) centres at
+   (W - 2(g + gap) - T)/2, putting the title's midpoint at exactly W/2
+   whatever T and W are. The glyph keeps its exact gap from the text either
+   way, which absolute positioning off the box edge would not have done.
 
-.task__status {
+   Before this the row was flex-start in an estimated-width box, so both
+   errors showed up at once: edges met the label off-centre, by an amount
+   that varied per title. */
+.canvas .task__body {
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: var(--s1);
-  margin: 0 0 var(--s1);
-  color: var(--ink-mute);
+  gap: var(--s2);
+  padding: 0 calc(var(--glyph-slot) + var(--s2)) 0 0;
+  min-width: 0;
 }
 
-.task__glyph {
-  font-size: 10px;
-  line-height: 1;
-}
+/* Collapses the "Done"/"In progress"/etc. word that follows the glyph in the
+   blueprint style, without touching the markup: the glyph is restored to
+   size immediately below. Status still reads without colour -- the glyph
+   alone carries it, same as the blueprint style's border weight/dash.
 
-.task__title {
+   Pinned to a fixed-width slot rather than sized by its own glyph, because
+   .task__body's right padding has to cancel this width exactly and can only
+   do that if it is a known quantity. `gap: 0` because the collapsed status
+   word is still a flex item here -- a gap would be laid out against it and
+   silently widen the slot. */
+.canvas .task__status {
+  order: -1;
+  flex: 0 0 var(--glyph-slot);
+  justify-content: center;
+  gap: 0;
   margin: 0;
-  font-size: var(--t-small);
-  font-weight: 500;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+  font-size: 0;
+  color: inherit;
 }
 
-.task__detail {
-  margin: var(--s2) 0 0;
-  color: var(--ink-mute);
-  font-size: var(--t-annotation);
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.canvas .task__glyph {
+  font-size: 13px;
 }
 
-/* Status is carried by the drawing convention, not by fill colour alone.
-   The blueprint specifies 1.5px for the heavy weights against a 1px hairline
-   for `todo`, but Chrome floors a 1.5px border to 1px at devicePixelRatio 1 --
-   which erases the very distinction the convention rests on. 2px keeps the
-   hierarchy legible on ordinary displays as well as retina. */
-.task--done {
-  border: 2px solid var(--st-done);
+/* Mirrors the reference's node label: Montserrat 600, uppercase, tracked,
+   pure white. Every part of that is load-bearing --
+
+   - the face is Montserrat because its wide geometric letterforms are what
+     make the label legible at this size; --font-display is condensed and
+     reads cramped, which is the opposite direction.
+   - 600 is the only weight loaded (tokens.css). Asking for 700 leaves the
+     browser to synthesize it, which thickens and smears the strokes.
+   - the reference's own DOM says "Block domains" and renders "BLOCK
+     DOMAINS", so the caps come from CSS, as they do here. Note this lands
+     back on blueprint's uppercase/tracked annotation convention rather than
+     diverging from it.
+   - --ink-strong, not --ink: the reference draws these in pure white.
+
+   Labels are never truncated: nodeWidth is unbounded, so the box always hugs
+   the whole title. No overflow/ellipsis here -- if a title ever overflowed it
+   should show as a wrong-width box, not as silently lost words. */
+.canvas .task__title {
+  font-family: var(--font-label);
+  font-size: var(--t-small); /* 13px */
+  font-weight: 600;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-strong);
+  white-space: nowrap;
+  opacity: 1;
 }
-.task--done .task__status {
+
+/* Status colour is carried by the glyph alone -- the title stays white for
+   every status. Dimming todo/blocked titles to --ink-mute reintroduces exactly
+   the low-contrast look this drawing avoids, so there is deliberately no
+   per-status title colour here. */
+.canvas .task--done .task__glyph {
   color: var(--st-done);
 }
-
-.task--wip {
-  border: 2px dashed var(--st-wip);
+.canvas .task--wip .task__glyph {
+  color: var(--st-wip);
 }
-.task--wip .task__status {
-  color: var(--st-wip-ink);
+.canvas .task--todo .task__glyph {
+  color: var(--st-todo);
 }
-
-.task--todo {
-  border: 1px solid var(--st-todo);
-}
-.task--todo .task__title {
-  opacity: 0.8;
-}
-
-.task--blocked {
-  border: 2px solid var(--st-blocked);
-}
-.task--blocked .task__rail {
-  flex-basis: 4px;
-  border-right: 3px solid var(--st-blocked);
-}
-.task--blocked .task__status {
+.canvas .task--blocked .task__glyph {
   color: var(--st-blocked);
 }
 
-.react-flow__node:hover .task {
-  border-color: var(--ink);
+/* The sheet name stays mono -- that is what marks it as the sheet rather than
+   a task, so it deliberately does not follow the label face above. 500 is the
+   heaviest mono face loaded (tokens.css); 700 was synthesized. */
+.canvas .task--root .task__title {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  font-family: var(--font-mono);
 }
 
-.react-flow__node.selected .task {
-  border-color: var(--ink);
-  outline: 1px solid var(--ink);
-  outline-offset: 1px;
+.canvas .react-flow__edge--root .react-flow__edge-path {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+/* Hover lifts the node off the ground. The direction has to follow the ground:
+   brightening on the light ground washes the label out toward it instead of
+   away from it, which reads as the node going dim. */
+.canvas .react-flow__node:hover .task {
+  filter: brightness(0.75);
+}
+
+[data-theme='dark'] .canvas .react-flow__node:hover .task {
+  filter: brightness(1.3);
+}
+
+.canvas .react-flow__node.selected .task {
+  outline: 1px dashed var(--ink);
+  outline-offset: 6px;
+  filter: none;
 }
 
 /* React Flow ships `.react-flow__node.selectable:focus-visible { outline: none }`
@@ -466,140 +496,25 @@
   border-radius: var(--radius);
 }
 
-.task__handle {
-  width: 9px;
-  height: 9px;
-  background: var(--surface);
-  border: 2px solid var(--rule-strong);
-  border-radius: 1px;
-}
-
-.task__handle.connectionindicator {
-  border-color: var(--accent-draw);
-}
-
-.react-flow__handle.connectingfrom,
-.react-flow__handle:hover {
-  background: var(--accent-draw);
-}
-
-/* --- neptune graph style ------------------------------------------------
-   Everything here is scoped under [data-graph-style='neptune'] .canvas, so
-   none of it leaks into the blueprint style or outside the canvas. Layout
-   direction, spacing and per-node dimensions come from layout.ts -- this is
-   purely how those reserved boxes get drawn. */
-
-@keyframes task-settle-vertical {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-[data-graph-style='neptune'] .canvas .task {
-  width: 100%;
-  min-height: 0;
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  animation-name: task-settle-vertical;
-}
-
-/* The accent rail identifies the app in the blueprint style; neptune has no
-   equivalent mark, so it is dropped rather than reskinned. */
-[data-graph-style='neptune'] .canvas .task__rail {
-  display: none;
-}
-
-[data-graph-style='neptune'] .canvas .task__body {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: 0;
-  min-width: 0;
-}
-
-/* Collapses the "Done"/"In progress"/etc. word that follows the glyph in the
-   blueprint style, without touching the markup: the glyph is restored to
-   size immediately below. Status still reads without colour -- the glyph
-   alone carries it, same as the blueprint style's border weight/dash. */
-[data-graph-style='neptune'] .canvas .task__status {
-  order: -1;
-  margin: 0;
-  font-size: 0;
-  color: inherit;
-}
-
-[data-graph-style='neptune'] .canvas .task__glyph {
-  font-size: 13px;
-}
-
-[data-graph-style='neptune'] .canvas .task__title {
-  font-family: var(--font-mono);
-  font-size: var(--t-annotation);
-  font-weight: 600;
-  letter-spacing: var(--track);
-  text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 1;
-}
-
-/* Neptune shows no description inline -- the side panel is where that lives. */
-[data-graph-style='neptune'] .canvas .task__detail {
-  display: none;
-}
-
-[data-graph-style='neptune'] .canvas .task--done .task__status,
-[data-graph-style='neptune'] .canvas .task--done .task__title {
-  color: var(--st-done);
-}
-[data-graph-style='neptune'] .canvas .task--wip .task__status,
-[data-graph-style='neptune'] .canvas .task--wip .task__title {
-  color: var(--st-wip);
-}
-[data-graph-style='neptune'] .canvas .task--todo .task__status,
-[data-graph-style='neptune'] .canvas .task--todo .task__title {
-  color: var(--st-todo);
-}
-[data-graph-style='neptune'] .canvas .task--blocked .task__status,
-[data-graph-style='neptune'] .canvas .task--blocked .task__title {
-  color: var(--st-blocked);
-}
-
-[data-graph-style='neptune'] .canvas .react-flow__node:hover .task {
-  filter: brightness(1.3);
-}
-
-[data-graph-style='neptune'] .canvas .react-flow__node.selected .task {
-  outline: 1px dashed var(--ink);
-  outline-offset: 6px;
-  filter: none;
-}
-
-[data-graph-style='neptune'] .canvas .task__handle {
+/* The connect handles are invisible marks -- the label is the target; these
+   only give React Flow something to anchor edge paths and drags to. */
+.canvas .task__handle {
   width: 6px;
   height: 6px;
   background: transparent;
-  border-color: transparent;
+  border: 0;
 }
 
 /* Solid by default -- the dashed, moving treatment below is reserved for
    edges flowing into a wip task, so it reads as a signal rather than a
    blanket texture. */
-[data-graph-style='neptune'] .canvas .react-flow__edge-path {
+.canvas .react-flow__edge-path {
   stroke: var(--rule-strong);
   stroke-width: 1;
 }
 
-[data-graph-style='neptune'] .canvas .react-flow__edge.selected .react-flow__edge-path,
-[data-graph-style='neptune'] .canvas .react-flow__edge:focus-visible .react-flow__edge-path {
+.canvas .react-flow__edge.selected .react-flow__edge-path,
+.canvas .react-flow__edge:focus-visible .react-flow__edge-path {
   stroke: var(--ink);
   stroke-width: 1.5;
 }
@@ -608,7 +523,7 @@
    `animated` on exactly those). The dash and colour are ours; the crawling
    motion is React Flow's own `.animated` keyframe (style.css), left alone so
    the two definitions can't drift out of step. */
-[data-graph-style='neptune'] .canvas .react-flow__edge.animated .react-flow__edge-path {
+.canvas .react-flow__edge.animated .react-flow__edge-path {
   stroke: var(--st-wip);
   stroke-width: 1.25;
   stroke-dasharray: 2 4;
@@ -645,6 +560,9 @@
 /* --- title block ------------------------------------------------------- */
 
 .titleblock {
+  /* Hidden for now -- clutter on the canvas. Rules kept intact in case it
+     comes back; this is the only line standing between it and visible. */
+  display: none;
   position: absolute;
   right: var(--s5);
   bottom: var(--s5);
@@ -1030,6 +948,18 @@
   font-size: 10px;
 }
 
+/* The parent panel lists boards, not tasks. A board has no status, so its mark
+   takes the board's own accent -- the same colour its tab carries -- and its
+   task count rides on the right where a status word would be. */
+.links__link--board {
+  --dot: var(--tab-accent-draw);
+}
+
+.links__meta {
+  margin-left: auto;
+  color: var(--ink-mute);
+}
+
 .links__cut {
   flex: 0 0 auto;
   width: 22px;
@@ -1119,11 +1049,10 @@
   font-size: var(--t-annotation);
   letter-spacing: var(--track);
   text-transform: uppercase;
-  /* Titles are free text, so clamp rather than let the menu grow unbounded. */
+  /* Titles are free text, so cap the menu's width -- but wrap rather than
+     truncate, since a heading is never allowed to lose words. */
   max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .menu__group + .menu__group {
@@ -1185,6 +1114,74 @@
   padding: var(--s2) var(--s3);
   color: var(--ink-mute);
   font-size: var(--t-small);
+}
+
+/* --- node popover --------------------------------------------------------
+   View mode opens this instead of `.panel` -- see "reserve the side bar for
+   admin mode" in App.tsx. Same dismiss-layer pattern as `.menu-layer`. */
+.popover-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.node-popover {
+  position: fixed;
+  width: 260px;
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.node-popover__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+
+.node-popover__detail {
+  margin: 0;
+  color: var(--ink-mute);
+  font-size: var(--t-small);
+  line-height: 1.5;
+}
+
+.node-popover__status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  margin-top: var(--s1);
+  padding: 2px var(--s2);
+  background: var(--ground);
+  border-radius: var(--radius);
+  color: var(--ink-mute);
+  font-size: var(--t-annotation);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+
+.node-popover__glyph {
+  font-family: var(--font-mono);
+}
+
+.node-popover--done .node-popover__status {
+  color: var(--st-done);
+}
+.node-popover--wip .node-popover__status {
+  color: var(--st-wip-ink);
+}
+.node-popover--todo .node-popover__status {
+  color: var(--st-todo-ink);
+}
+.node-popover--blocked .node-popover__status {
+  color: var(--st-blocked);
 }
 
 /* --- responsive -------------------------------------------------------- */

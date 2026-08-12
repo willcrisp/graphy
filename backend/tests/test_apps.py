@@ -18,7 +18,11 @@ async def test_create_derives_a_key_from_the_name(admin, session):
 
     graph = await admin.get("/api/apps/tessellate-pro/graph")
     assert graph.status_code == 200
-    assert graph.json()["nodes"] == []
+    # A fresh app has no tasks, but does have its own root node.
+    nodes = graph.json()["nodes"]
+    assert len(nodes) == 1
+    assert nodes[0]["is_root"] is True
+    assert nodes[0]["title"] == "Tessellate Pro"
 
 
 async def test_create_uniquifies_a_colliding_key(admin, session):

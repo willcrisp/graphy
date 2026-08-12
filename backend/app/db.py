@@ -15,7 +15,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models import Base
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+
+#: Columns added to an existing table after that table first shipped.
+#: `create_all` creates missing *tables* but never alters an existing one, so a
+#: database written before the column existed would keep failing on every read.
+#: This is not a migration framework and is not meant to grow into one -- there
+#: is no down direction, no ordering, and no version gate. It is the additive
+#: case only: a nullable column with no default, safe to apply to any row.
+#: Anything that needs more than that (a rename, a backfill, a NOT NULL) is a
+#: rebuild, and the honest answer there is `seed.py --reset`.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # Schema 2: parent projects.
+    ("app", "parent_id", "INTEGER REFERENCES parent(id) ON DELETE SET NULL"),
+)
 
 
 class Database:
@@ -39,6 +52,19 @@ class Database:
     async def create_all(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            for table, column, definition in _ADDED_COLUMNS:
+                present = {
+                    row[1]
+                    for row in await connection.execute(
+                        text(f"PRAGMA table_info({table})")
+                    )
+                }
+                # A fresh database already has the column -- create_all built
+                # the table from the current model. Only an older file needs it.
+                if column not in present:
+                    await connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                    )
             await connection.execute(
                 text(
                     "INSERT INTO meta (key, value) VALUES ('schema_version', :v) "

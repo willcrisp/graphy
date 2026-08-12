@@ -96,6 +96,59 @@ that breaks the entire test suite at import time.
 `create_app(settings)` takes settings as an argument; the DB is created in the
 lifespan and hangs off `app.state.db`.
 
+### Parent projects and the overview page
+
+There are two pages, not one: a board (`/a/{key}`) and the overview (`/all`),
+which draws **every** board on a single canvas. They share the canvas, the tab
+strip and the panel.
+
+A `Parent` row is a name and a description and nothing else — no status, no
+tasks, no edges. Several apps point at the same one via `App.parent_id`, and
+that shared row is the only thing joining otherwise-independent boards. It is
+optional (`parent_id` is nullable) and deliberately flat: a parent has no
+parent, so there is no hierarchy to cycle-check. `ON DELETE SET NULL`, not
+CASCADE — deleting a parent detaches its boards, it never destroys one. That
+distinction has a test.
+
+**What is editable where is the load-bearing rule.** Tasks and dependencies are
+edited on their own board; the overview edits only the structure *between*
+boards. That is why `App.tsx` has both `showEditing` and `editingTasks` — the
+second is the first minus the overview, and it gates the Add-task button, the
+connect handles, the status/delete items in the node menu, and `DetailPanel`'s
+editability. It exists because a task mutation returns one `BoardOut`, which
+there is no sane way to splice into a multi-board canvas.
+
+Parent mutations answer with the whole `OverviewOut` for the same reason app
+mutations answer with the whole tab strip, and they bypass `runMutation` for
+the same reason too (see "Every mutation is applied twice"): they re-shape
+which boards join to what, so there is no single board to patch or roll back.
+The overview held in `App.tsx` is **re-fetched on arrival, never patched from a
+board's response** — `loadOverview`.
+
+`canvas.ts` is what keeps `Graph.tsx` from knowing any of this. It flattens
+either page into one `CanvasGraph`:
+
+- `nodes` are `CanvasNode`s carrying a `kind` (`task` / `root` / `parent`).
+  `TaskNode.tsx` branches on that, never on `is_root`. A parent has no row in
+  `node`, so it is mapped into the node id space by `parentNodeId` — the same
+  trick as the synthetic edges, one decade lower.
+- `edges` are the stored ones. `structural` are the computed joins: root to
+  its top-level tasks, parent to the roots under it. Those are inert (no menu,
+  no selection, nothing to delete) because there is no row behind them.
+- `layoutGraph` no longer derives root edges itself. It takes **every** drawn
+  edge, `structural` included, so layout and drawing cannot disagree about
+  which connections exist.
+
+Two ordering details make the overview lay out sanely, and both are no-ops on a
+single board: `layoutGraph` sorts nodes by `app_id` first (without it six
+boards' `sort_order`s interleave and dagre shuffles the clusters together), and
+parent pseudo-nodes take `app_id: 0` so they sort ahead of every real board.
+
+The overview mixes boards, so a node cannot inherit its board's accent from
+`.canvas` and carries `--accent` itself. `.task` is therefore in `tokens.css`'s
+`--accent-draw` derivation list — see the note there, and the accent warning
+under "Conventions that will bite you."
+
 ### Layout is computed, never persisted
 
 `frontend/src/layout.ts` runs dagre on load and after every mutation. Node positions
@@ -125,53 +178,47 @@ OS, anything else follows the OS — and it is pure so `theme.test.ts` can cover
 without a DOM. The storage key `blueprint.theme` is duplicated as a literal in
 `index.html`, because that script has to run before any module loads. Change both.
 
-Only colour changes between themes. Every rule weight, size and space is shared,
-because status is carried by the drawing convention (hairline vs heavy, dashed for
-`wip`), not by fill.
+Only colour changes between themes. Every rule weight, size and space is shared.
+A node carries its status in the glyph next to its label — the glyph character
+reads without colour, the hue only reinforces it.
 
-### Graph style is a second, independent attribute
+### The canvas has its own palette, and the drawing is fixed
 
-`data-graph-style` (`blueprint` or `neptune`, set by `graphStyle.ts`) is unrelated to
-`data-theme` — either graph style combines with either theme. Unlike the theme, it
-only reskins `.canvas`: the topbar, panel and dialogs never look at it. `useGraphStyle`
-shares its localStorage-backed wiring with `useTheme` through
-`persistedChoice.ts`'s `usePersistedChoice` — each still keeps its own pure resolver
-(`resolveGraphStyle`/`resolveTheme`, independently tested) and its own `apply`
-function, because the fallback rule genuinely differs: theme falls back to the OS
-preference, graph style has no such thing. There's no pre-paint script in
-`index.html` for graph style — `.canvas` doesn't exist until the board has finished
-loading, so there's nothing to flash.
+There is one way to draw the graph: a vertical dagre layout of borderless
+glyph-and-label nodes joined by flowing bezier edges with arrowheads. (There used to
+be a second, `blueprint` — bordered cards, right-angle edges, laid out left to right —
+selectable through a `data-graph-style` attribute and a toggle in the topbar. It's
+gone: no attribute, no toggle, no `graphStyle.ts`.)
 
-Neptune is a vertical, more expansive layout with borderless glyph-and-label nodes
-instead of bordered cards, flowing bezier edges with arrowheads instead of blueprint's
-right-angle steps, and a fixed near-black canvas ground that does **not** vary with
-the light/dark theme — that ground is the one trait that defines the look. `layout.ts`'s
-`layoutGraph` takes the style as a
-third argument and branches dagre's `rankdir`/spacing and the per-node dimensions
-(`neptuneNodeWidth` hugs the label; blueprint's `nodeHeight` wraps a fixed card
-width). Rank is read off whichever axis dagre actually ranks on for that direction —
-x for `LR`, y for `TB` — which is also why `TaskNode`'s `Handle`s move from
-left/right to top/bottom under Neptune: React Flow anchors edge paths to them, so
-that one placement decision can't be done in CSS.
+The canvas keeps its own ground, separate from the chrome around it — greener and
+further from mid-grey than the topbar and panel, near-black in dark and near-white in
+light. Those tokens are redeclared on `.canvas` in `tokens.css`, light-first with a
+`[data-theme='dark'] .canvas` override after it, the same shape as `:root` and
+`:root[data-theme='dark']` above them. **The two are equally specific, so source order
+is what decides the dark one wins — keep them in that order.** The same ordering shows
+up in `app.css`'s node hover, which brightens on the dark ground and darkens on the
+light one, because "lift" means moving *away* from the ground, not up.
 
-Everything else — hiding the card border and detail paragraph, collapsing the status
-word down to just its glyph, recolouring by status — is a plain CSS override under
-`[data-graph-style='neptune']`, deliberately kept out of `TaskNode.tsx` the same way
-`data-theme` never touches component logic. The one trap: `color` is a regular
-property, not a custom one, so an element under `.canvas` that never redeclares it
-(the title block's date/sheet values, its task count) inherits the *computed* colour
-from `body` — the outer theme's ink, not this scope's override — unless something
-between them redeclares `color: var(--ink)`. That redeclaration lives right next to
-Neptune's token overrides in `tokens.css`; if new canvas-scoped tokens stop showing
-up, this is the first thing to check.
+The one trap in that scope: `color` is a regular property, not a custom one, so an
+element under `.canvas` that never redeclares it (the title block's date/sheet values,
+its task count) inherits the *computed* colour from `body` — the outer theme's ink,
+not the canvas scope's — unless something between them redeclares `color: var(--ink)`.
+That redeclaration sits right next to the canvas token overrides in `tokens.css`; if
+new canvas-scoped tokens stop showing up, this is the first thing to check.
 
-Every Neptune edge is solid by default; the one exception is deliberate signal, not
-decoration. `Graph.tsx` sets React Flow's `animated` on an edge exactly when its
-*target* is `wip` — done-into-wip or todo-into-wip both qualify, the source status is
-irrelevant — and app.css recolours and redashes only `.react-flow__edge.animated`
-paths (`--st-wip`, a tighter dash) while leaving the crawling motion itself to React
-Flow's own `.animated` keyframe in its stylesheet, so the two can't drift apart. An
-edge whose target is done, todo or blocked always renders solid regardless of style.
+`layout.ts` ranks top-to-bottom (`rankdir: 'TB'`), so rank is read off `y`, and
+`TaskNode`'s `Handle`s sit top/bottom. Handle placement is the one part of the drawing
+that can't be done in CSS — React Flow anchors edge paths to them. Node dimensions are
+`NODE_HEIGHT` (constant, since no detail paragraph is drawn inline) and `nodeWidth()`,
+which hugs the label.
+
+Every edge is solid by default; the one exception is deliberate signal, not decoration.
+`Graph.tsx` sets React Flow's `animated` on an edge exactly when its *target* is `wip`
+— done-into-wip or todo-into-wip both qualify, the source status is irrelevant — and
+app.css recolours and redashes only `.react-flow__edge.animated` paths (`--st-wip`, a
+tighter dash) while leaving the crawling motion itself to React Flow's own `.animated`
+keyframe in its stylesheet, so the two can't drift apart. An edge whose target is done,
+todo or blocked always renders solid.
 
 ### Every mutation is applied twice: locally, then from the response
 
@@ -214,15 +261,17 @@ avoid.
   dismissal shared by `SignIn` and `AppDialog`. A new modal wraps its content
   in this rather than reimplementing the backdrop handlers.
 - **`components/ToggleGroup.tsx`** — the `role="group"` row of
-  `aria-pressed` buttons behind `ModeToggle` (view/edit) and
-  `GraphStyleToggle` (blueprint/neptune). Both are two-way today; the
-  component itself is not limited to two options.
+  `aria-pressed` buttons behind `ModeToggle` (view/edit). It is two-way
+  today; the component itself is not limited to two options.
 - **`persistedChoice.ts`**'s `usePersistedChoice` — the localStorage-seed,
-  apply-on-change, persist-on-choose wiring behind `useTheme` and
-  `useGraphStyle` (see "Graph style is a second, independent attribute"
-  above). It returns the raw setter alongside the persisting one because
+  apply-on-change, persist-on-choose wiring behind `useTheme`. It returns
+  the raw setter alongside the persisting one because
   `useTheme` needs to track the OS preference *without* writing it to
   storage — following the system is not an explicit choice.
+- **`canvas.ts`**'s `buildBoard` / `buildOverview` — the two pages'
+  server shapes flattened into the one `CanvasGraph` the canvas draws (see
+  "Parent projects and the overview page"). A third thing to draw on that
+  canvas is a third builder here, not a branch inside `Graph.tsx`.
 - **`totalOf(counts)`** in `types.ts` — sums a `StatusCounts`. Used by the
   tab strip, the delete-app confirmation, and the title block; summing the
   four fields by hand anywhere is a sign a fifth status will silently be
@@ -243,6 +292,18 @@ working by asserting an orphan insert raises `IntegrityError`.
 
 Deleting a node cascades its edges but does **not** reparent its children — they
 become roots of the layout. This is intended behaviour with a test asserting it.
+
+`App.parent_id` is the one FK that is `ON DELETE SET NULL` rather than CASCADE:
+a board must survive the deletion of the parent project above it. The service
+writes the detach out by hand anyway (`delete_parent`), because the pragma fires
+in the database while an `App` already loaded in the session would keep a stale
+`parent_id` — and the summaries are built from that session moments later.
+
+There is no migration framework, deliberately. `db.py`'s `_ADDED_COLUMNS` is the
+additive case only — a nullable column with no default, applied if a
+`PRAGMA table_info` says it is missing. Anything beyond that (a rename, a
+backfill, a NOT NULL) is a rebuild: bump `SCHEMA_VERSION` and re-seed with
+`--reset`. Do not grow that list into a migration system.
 
 ## Conventions that will bite you
 
@@ -265,13 +326,13 @@ against **both** `--ground` and `--surface` in **both** themes.
 **Never paint with `--accent` or `--tab-accent` directly — use `--accent-draw` /
 `--tab-accent-draw`.** The accent is one stored hex per app, chosen against the light
 ground and injected as an inline custom property; the drawn tokens mix it toward
-white in dark. They are re-derived on `:root`, `.canvas` and `.tab` separately
-because `var()` substitution happens where the declaration sits, so a single
-derivation at `:root` would freeze every descendant to the root's accent.
-
-**Borders are 2px, not 1.5px.** Chrome floors a 1.5px border to 1px at
-`devicePixelRatio: 1`, which erases the hairline-versus-heavy distinction the status
-convention depends on. `todo` is the only 1px status.
+white in dark. They are re-derived on `:root`, `.canvas`, `.tab` and
+`.links__link` separately because `var()` substitution happens where the
+declaration sits, so a single derivation at `:root` would freeze every
+descendant to the root's accent. `.links__link` is on the list because the
+parent panel shows rows from several boards at once, so a row has to carry its
+own accent rather than inherit one — anything else that shows rows from more
+than one board needs adding to that list too.
 
 **React Flow's stylesheet outguns naive selectors.** It ships
 `.react-flow__node.selectable:focus-visible { outline: none }` at specificity 0-3-0.

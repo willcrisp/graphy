@@ -240,3 +240,50 @@ async def test_orphan_node_insert_is_refused_by_foreign_key(session):
     with pytest.raises(IntegrityError):
         await session.commit()
     await session.rollback()
+
+
+# --- Invariant 6: the root node is structural, not an ordinary task --------
+
+
+async def test_create_app_gives_it_a_root_node(session):
+    app = await service.create_app(session, name="Widgets")
+    root = await session.scalar(select(Node).where(Node.app_id == app.id, Node.is_root.is_(True)))
+    assert root is not None
+    assert root.title == "Widgets"
+
+
+async def test_root_node_cannot_be_deleted(session):
+    app = await service.create_app(session, name="Widgets")
+    root = await session.scalar(select(Node).where(Node.app_id == app.id, Node.is_root.is_(True)))
+    with pytest.raises(GraphError):
+        await service.delete_node(session, root.id)
+
+
+async def test_root_node_cannot_be_edited_directly(session):
+    app = await service.create_app(session, name="Widgets")
+    root = await session.scalar(select(Node).where(Node.app_id == app.id, Node.is_root.is_(True)))
+    with pytest.raises(GraphError):
+        await service.update_node(session, root.id, {"title": "Renamed"})
+
+
+async def test_root_node_cannot_be_connected_to_other_tasks(session):
+    app = await service.create_app(session, name="Widgets")
+    root = await session.scalar(select(Node).where(Node.app_id == app.id, Node.is_root.is_(True)))
+    task = await make_node(session, app, "A task")
+    with pytest.raises(GraphError):
+        await service.create_edge(session, app, source_id=root.id, target_id=task.id)
+
+
+async def test_renaming_app_renames_its_root_node(session):
+    app = await service.create_app(session, name="Widgets")
+    await service.rename_app(session, app.key, "Gadgets")
+    root = await session.scalar(select(Node).where(Node.app_id == app.id, Node.is_root.is_(True)))
+    assert root.title == "Gadgets"
+
+
+async def test_root_node_excluded_from_status_tally(session):
+    app = await service.create_app(session, name="Widgets")
+    await make_node(session, app, "A task", status="done")
+    counts = (await service.app_summaries(session))[0].counts
+    assert counts.done == 1
+    assert sum([counts.done, counts.wip, counts.todo, counts.blocked]) == 1

@@ -36,11 +36,29 @@ class AppOut(BaseModel):
     key: str
     name: str
     accent: str
+    #: The parent project this board hangs off, or null for a standalone board.
+    #: Only the overview canvas draws anything with it; a board's own page is
+    #: unchanged by it.
+    parent_id: int | None
     sort_order: int
 
 
 class AppSummary(AppOut):
     counts: StatusCounts
+
+
+class ParentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    detail: str | None
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    _v_created = field_validator("created_at")(_as_utc)
+    _v_updated = field_validator("updated_at")(_as_utc)
 
 
 class NodeOut(BaseModel):
@@ -52,6 +70,7 @@ class NodeOut(BaseModel):
     detail: str | None
     status: Status
     external_ref: str | None
+    is_root: bool
     sort_order: int
     created_at: datetime
     updated_at: datetime
@@ -99,6 +118,40 @@ class NodeMutationOut(BoardOut):
 
 class EdgeMutationOut(BoardOut):
     edge: EdgeOut
+
+
+class OverviewOut(BaseModel):
+    """Every board at once: what the overview canvas draws.
+
+    The same idea as `BoardOut` one level up. Where a board is one app's nodes
+    and edges, this is *all* of them, plus the parent projects that join them.
+    Nodes and edges carry `app_id`, so the client can tell the clusters apart
+    without a per-app envelope.
+
+    Nothing here is grouped or nested. The canvas lays every node out in one
+    dagre pass and the joins between boards are computed from `parent_id`, so
+    a flat list is exactly what it wants.
+    """
+
+    parents: list[ParentOut]
+    apps: list[AppSummary]
+    nodes: list[NodeOut]
+    edges: list[EdgeOut]
+    last_updated: datetime | None
+
+    _v_last_updated = field_validator("last_updated")(_as_utc)
+
+
+class ParentMutationOut(OverviewOut):
+    """An overview plus the parent project just written, so it can be selected.
+
+    Parent mutations answer with the whole overview for the same reason app
+    mutations answer with the whole tab strip: attaching, detaching or deleting
+    a parent re-shapes which boards join to what, which is not a patch to one
+    board but a change to the structure between all of them.
+    """
+
+    parent: ParentOut
 
 
 class ConfigOut(BaseModel):
@@ -160,6 +213,36 @@ class AppUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
     _v_name = field_validator("name")(_name)
+
+
+class ParentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    detail: str | None = Field(default=None, max_length=2000)
+
+    _v_name = field_validator("name")(_name)
+    _v_detail = field_validator("detail")(_detail)
+
+
+class ParentUpdate(BaseModel):
+    """PATCH body, same convention as `NodeUpdate`: absent fields are left
+    alone, an explicit `detail: null` clears the description."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    detail: str | None = Field(default=None, max_length=2000)
+
+    _v_name = field_validator("name")(lambda v: _name(v) if v is not None else None)
+    _v_detail = field_validator("detail")(_detail)
+
+
+class AppParentUpdate(BaseModel):
+    """Which parent project a board hangs off. `null` detaches it.
+
+    Its own endpoint rather than a field on `AppUpdate`, because that body's
+    `name` is required -- folding an optional field into it would make every
+    rename able to silently re-parent a board.
+    """
+
+    parent_id: int | None
 
 
 class AppsOut(BaseModel):

@@ -12,11 +12,18 @@ import re
 from collections import defaultdict
 from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, Edge, Node
-from app.schemas import AppSummary, BoardOut, GraphOut, StatusCounts
+from app.models import App, Edge, Node, Parent
+from app.schemas import (
+    AppSummary,
+    BoardOut,
+    GraphOut,
+    OverviewOut,
+    ParentOut,
+    StatusCounts,
+)
 
 
 class GraphError(Exception):
@@ -37,9 +44,11 @@ async def list_apps(session: AsyncSession) -> list[tuple[App, StatusCounts]]:
         .all()
     )
     rows = await session.execute(
-        select(Node.app_id, Node.status, func.count()).group_by(
-            Node.app_id, Node.status
-        )
+        # The root node carries a filler status (see create_app) and is not a
+        # real task, so it must never inflate the tally the tab strip shows.
+        select(Node.app_id, Node.status, func.count())
+        .where(Node.is_root.is_(False))
+        .group_by(Node.app_id, Node.status)
     )
     tally: dict[int, dict[str, int]] = defaultdict(dict)
     for app_id, status, count in rows:
@@ -94,6 +103,7 @@ async def app_summaries(session: AsyncSession) -> list[AppSummary]:
             key=app.key,
             name=app.name,
             accent=app.accent,
+            parent_id=app.parent_id,
             sort_order=app.sort_order,
             counts=counts,
         )
@@ -115,6 +125,54 @@ async def get_node(session: AsyncSession, node_id: int) -> Node:
     if node is None:
         raise NotFoundError(f"No node with id {node_id}.")
     return node
+
+
+async def list_parents(session: AsyncSession) -> list[Parent]:
+    return list(
+        (
+            await session.execute(select(Parent).order_by(Parent.sort_order, Parent.id))
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def get_parent(session: AsyncSession, parent_id: int) -> Parent:
+    parent = await session.get(Parent, parent_id)
+    if parent is None:
+        raise NotFoundError(f"No parent project with id {parent_id}.")
+    return parent
+
+
+async def get_overview(session: AsyncSession) -> OverviewOut:
+    """Every board's nodes and edges in one payload, plus the parent projects.
+
+    Ordered the same way `get_graph` orders one board -- by app, then
+    `sort_order`, then id -- because the overview canvas feeds this straight to
+    dagre, whose output depends on insertion order. Layout stability across
+    reloads is a tested requirement here exactly as it is for a single board.
+    """
+    nodes = (
+        (
+            await session.execute(
+                select(Node).order_by(Node.app_id, Node.sort_order, Node.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    edges = (
+        (await session.execute(select(Edge).order_by(Edge.app_id, Edge.id)))
+        .scalars()
+        .all()
+    )
+    return OverviewOut(
+        parents=[ParentOut.model_validate(p) for p in await list_parents(session)],
+        apps=await app_summaries(session),
+        nodes=list(nodes),
+        edges=list(edges),
+        last_updated=max((node.updated_at for node in nodes), default=None),
+    )
 
 
 # --- app mutations ---------------------------------------------------------
@@ -158,6 +216,14 @@ async def create_app(
         sort_order=(highest or 0) + 1,
     )
     session.add(app)
+    await session.flush()
+    # Every app gets a root node representing the app itself -- the single
+    # top-level ancestor the graph hangs off. `status` is filler (never shown,
+    # excluded from tallies above); sort_order is negative so it always sorts
+    # before ordinary nodes, which start at 1 (see create_node).
+    session.add(
+        Node(app_id=app.id, title=app.name, status="todo", is_root=True, sort_order=-1)
+    )
     await session.commit()
     await session.refresh(app)
     return app
@@ -166,6 +232,11 @@ async def create_app(
 async def rename_app(session: AsyncSession, key: str, name: str) -> App:
     app = await get_app(session, key)
     app.name = name
+    root = await session.scalar(
+        select(Node).where(Node.app_id == app.id, Node.is_root.is_(True))
+    )
+    if root is not None:
+        root.title = name
     await session.commit()
     await session.refresh(app)
     return app
@@ -184,6 +255,81 @@ async def delete_app(session: AsyncSession, key: str) -> None:
         )
     await session.delete(app)
     await session.commit()
+
+
+# --- parent project mutations ----------------------------------------------
+
+
+async def _check_parent_name_free(
+    session: AsyncSession, name: str, *, exclude_id: int | None = None
+) -> None:
+    """Parent projects are picked from a list by name, so two that differ only
+    in case are indistinguishable to the person choosing one. Checked here so
+    the refusal is a sentence; `uq` on the column is the backstop under it."""
+    query = select(Parent).where(func.lower(Parent.name) == name.lower())
+    if exclude_id is not None:
+        query = query.where(Parent.id != exclude_id)
+    existing = await session.scalar(query)
+    if existing is not None:
+        raise GraphError(f"There is already a parent project called {existing.name!r}.")
+
+
+async def create_parent(
+    session: AsyncSession, *, name: str, detail: str | None = None
+) -> Parent:
+    await _check_parent_name_free(session, name)
+    highest = await session.scalar(select(func.max(Parent.sort_order)))
+    parent = Parent(name=name, detail=detail, sort_order=(highest or 0) + 1)
+    session.add(parent)
+    await session.commit()
+    await session.refresh(parent)
+    return parent
+
+
+async def update_parent(
+    session: AsyncSession, parent_id: int, changes: dict[str, object]
+) -> Parent:
+    parent = await get_parent(session, parent_id)
+    name = changes.get("name")
+    if isinstance(name, str):
+        await _check_parent_name_free(session, name, exclude_id=parent.id)
+    for field, value in changes.items():
+        setattr(parent, field, value)
+    await session.commit()
+    await session.refresh(parent)
+    return parent
+
+
+async def delete_parent(session: AsyncSession, parent_id: int) -> None:
+    """Delete a parent project. Its boards survive and become standalone.
+
+    The detach is written out rather than left to the FK's `ON DELETE SET NULL`
+    because the two disagree about *when*: the pragma fires in the database at
+    delete time, leaving any App already loaded in this session holding a stale
+    `parent_id`. Doing it here means the summaries built straight afterwards
+    are right without a session expiry.
+    """
+    parent = await get_parent(session, parent_id)
+    await session.execute(
+        update(App).where(App.parent_id == parent.id).values(parent_id=None)
+    )
+    await session.delete(parent)
+    await session.commit()
+
+
+async def set_app_parent(
+    session: AsyncSession, key: str, parent_id: int | None
+) -> App:
+    """Attach a board to a parent project, or detach it with `None`."""
+    app = await get_app(session, key)
+    # Resolved rather than trusted: an unknown id is a 404, not a dangling FK
+    # that only surfaces when the overview tries to draw the join.
+    if parent_id is not None:
+        await get_parent(session, parent_id)
+    app.parent_id = parent_id
+    await session.commit()
+    await session.refresh(app)
+    return app
 
 
 # --- node mutations --------------------------------------------------------
@@ -241,6 +387,8 @@ async def update_node(
     session: AsyncSession, node_id: int, changes: dict[str, object]
 ) -> Node:
     node = await get_node(session, node_id)
+    if node.is_root:
+        raise GraphError("The root node is renamed by renaming the app, not edited directly.")
     external_ref = changes.get("external_ref")
     if external_ref is not None:
         await _check_external_ref_free(
@@ -260,6 +408,8 @@ async def delete_node(session: AsyncSession, node_id: int) -> App:
     Returns the app it belonged to, which the caller needs to rebuild the board
     once the node itself is gone."""
     node = await get_node(session, node_id)
+    if node.is_root:
+        raise GraphError("The root node cannot be deleted. Delete the app instead.")
     app = await get_app_by_id(session, node.app_id)
     await session.delete(node)
     await session.commit()
@@ -312,6 +462,11 @@ async def create_edge(
             raise GraphError(
                 f"{label} task belongs to a different app. "
                 "Connections cannot cross between apps."
+            )
+        if node.is_root:
+            raise GraphError(
+                "The root node connects to every top-level task automatically "
+                "and cannot be wired by hand."
             )
 
     existing = await session.scalar(

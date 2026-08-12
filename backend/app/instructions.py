@@ -41,8 +41,13 @@ returns 403. Stop; there is nothing importable to do.
 
 ## Data model
 
-- **App** -- `key` (stable, URL-safe, chosen once), `name`. One app is one
-  board; tasks and edges never cross between apps.
+- **App** -- `key` (stable, URL-safe, chosen once), `name`, and an optional
+  `parent_id`. One app is one board; tasks and edges never cross between apps.
+- **Parent project** -- `name` (unique) and `detail`, and nothing else. Several
+  apps can point at the same one, which is how the overview canvas joins
+  otherwise-independent boards. Optional: an app with `parent_id: null` is
+  standalone. Deleting a parent project detaches its apps; it never deletes a
+  board.
 - **Task** (node) -- `title`, `detail` (free text, optional), `status` (one of
   {_STATUS_LIST}), and `external_ref`: an optional, opaque string unique
   *within its app*, meant for exactly this use case. Put the external
@@ -62,6 +67,12 @@ returns 403. Stop; there is nothing importable to do.
 |---|---|
 | `GET /api/apps` | List apps with per-status task counts. |
 | `POST /api/apps` | Create an app. `{{"name": "..."}}`. |
+| `GET /api/overview` | Every board at once: parents, apps, all tasks, all edges. |
+| `GET /api/parents` | List parent projects. |
+| `POST /api/parents` | Create one. `{{"name", "detail"?}}`. |
+| `PATCH /api/parents/{{id}}` | Update one. Only the fields present are touched. |
+| `DELETE /api/parents/{{id}}` | Delete one. Its apps are detached, not deleted. |
+| `PUT /api/apps/{{key}}/parent` | Attach a board. `{{"parent_id": 3}}`, or `null` to detach. |
 | `GET /api/apps/{{key}}/graph` | Full board: app, all tasks, all edges. |
 | `POST /api/apps/{{key}}/nodes` | Create a task. `{{"title", "detail"?, "status", "external_ref"?}}`. |
 | `PATCH /api/nodes/{{id}}` | Update a task. Only the fields present are touched. |
@@ -70,7 +81,22 @@ returns 403. Stop; there is nothing importable to do.
 | `DELETE /api/edges/{{id}}` | Delete an edge. |
 
 Every mutating endpoint returns the *whole* updated board (`{{graph, apps}}`),
-plus the row it just wrote -- there is no need to re-fetch after a write.
+plus the row it just wrote -- there is no need to re-fetch after a write. The
+parent-project endpoints are the exception in shape only: they answer with the
+whole overview (`{{parents, apps, nodes, edges, last_updated}}`), because what
+they change is the structure *between* boards rather than the contents of one.
+
+## Grouping boards under a parent project
+
+Only worth doing if the external tracker has a layer above its projects (an
+epic hierarchy, a portfolio, a product line). Map that layer to parent
+projects and leave `parent_id` null otherwise -- an app without one is normal,
+not incomplete.
+
+Names are unique and compared case-insensitively, so re-running a sync must
+reuse the existing row rather than creating a second: `GET /api/parents`,
+match on name, and `POST` only if there is no match. Then
+`PUT /api/apps/{{key}}/parent` for each board underneath it.
 
 ## Importing tickets idempotently
 

@@ -23,6 +23,7 @@ const node = (
   detail: null,
   status: 'todo',
   external_ref: null,
+  is_root: false,
   sort_order: id,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -37,7 +38,14 @@ const edge = (id: number, source_id: number, target_id: number): GraphEdge => ({
 })
 
 const graphOf = (nodes: TaskNodeData[], edges: GraphEdge[] = []): Graph => ({
-  app: { id: 1, key: 'alpha', name: 'Alpha', accent: '#1F5F8B', sort_order: 1 },
+  app: {
+    id: 1,
+    key: 'alpha',
+    name: 'Alpha',
+    accent: '#1F5F8B',
+    parent_id: null,
+    sort_order: 1,
+  },
   nodes,
   edges,
   last_updated: '2026-01-01T00:00:00Z',
@@ -168,6 +176,7 @@ describe('counts', () => {
         key: 'alpha',
         name: 'Alpha',
         accent: '#1F5F8B',
+        parent_id: null,
         sort_order: 1,
         counts: { done: 0, wip: 0, todo: 9, blocked: 0 },
       },
@@ -176,6 +185,7 @@ describe('counts', () => {
         key: 'beta',
         name: 'Beta',
         accent: '#5B4B8A',
+        parent_id: null,
         sort_order: 2,
         counts: { done: 4, wip: 0, todo: 0, blocked: 0 },
       },

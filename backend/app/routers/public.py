@@ -8,7 +8,7 @@ from fastapi.responses import PlainTextResponse
 from app.auth import is_authenticated
 from app.deps import SessionDep, SettingsDep
 from app.instructions import render as render_instructions
-from app.schemas import AppSummary, ConfigOut, GraphOut
+from app.schemas import AppSummary, ConfigOut, GraphOut, OverviewOut, ParentOut
 from app.services import graph as service
 
 router = APIRouter(prefix="/api", tags=["public"])
@@ -29,6 +29,17 @@ async def get_graph(key: str, session: SessionDep) -> GraphOut:
     return GraphOut(
         app=app, nodes=nodes, edges=edges, last_updated=last_updated
     )
+
+
+@router.get("/parents", response_model=list[ParentOut])
+async def list_parents(session: SessionDep) -> list[ParentOut]:
+    return [ParentOut.model_validate(p) for p in await service.list_parents(session)]
+
+
+@router.get("/overview", response_model=OverviewOut)
+async def get_overview(session: SessionDep) -> OverviewOut:
+    """Every board on one canvas. The read behind the overview page."""
+    return await service.get_overview(session)
 
 
 @router.get("/config", response_model=ConfigOut)

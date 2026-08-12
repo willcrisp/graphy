@@ -1,28 +1,34 @@
 import dagre from '@dagrejs/dagre'
-import type { GraphStyle } from './graphStyle'
 import type { TaskNodeData, GraphEdge } from './types'
 
 /** Node dimensions are fixed and known before layout. Measuring the DOM would
- *  make layout asynchronous and visibly janky on app switch, so height is
- *  derived from the content instead. */
-export const NODE_WIDTH = 260
-const HEIGHT_BASE = 62 // status line + one title line
-const HEIGHT_TITLE_LINE = 21 // each additional wrapped title line
-const HEIGHT_DETAIL = 38 // two clamped lines of detail plus its gap
-const TITLE_CHARS_PER_LINE = 26
+ *  make layout asynchronous and visibly janky on app switch, so both are
+ *  derived from the title instead.
+ *
+ *  A node is a single glyph-plus-label pill with no detail shown inline
+ *  (app.css hides it), so height is constant and width just has to hug the
+ *  label -- there is no wrapping to account for.
+ *
+ *  There is deliberately no upper bound on the width: a label is never
+ *  truncated, so the box grows to whatever the title needs. A long title makes
+ *  a wide node, which is the intended trade. */
+export const NODE_HEIGHT = 28
+/** Montserrat 600 at 13px, uppercased and tracked 0.08em, measured across the
+ *  seeded titles: 8.9px per character at the narrowest, 10.5px at the widest.
+ *  The widest is the right constant to carry -- overshooting only leaves slack
+ *  around a title that app.css centres anyway (and keeps the glyph's gap
+ *  exact regardless), whereas undershooting clips a label that had room.
+ *  Re-measure if the label's face, size or tracking changes. */
+const CHAR_WIDTH = 10.5
+/** Twice the glyph slot plus its gap (13 + 8): once for the glyph itself, once
+ *  for the right padding app.css adds to cancel it so the title centres on the
+ *  handle axis. Both halves live in `--glyph-slot` / `--s2` there. */
+const PADDING = 42
+const MIN_WIDTH = 84
 
-/** Neptune nodes are a single glyph-plus-label pill with no detail shown
- *  inline (app.css hides it), so height is constant and width just has to
- *  hug the label -- there is no wrapping to account for. */
-export const NEPTUNE_NODE_HEIGHT = 28
-const NEPTUNE_CHAR_WIDTH = 6.5
-const NEPTUNE_PADDING = 36
-const NEPTUNE_MIN_WIDTH = 84
-const NEPTUNE_MAX_WIDTH = 220
-
-export function neptuneNodeWidth(title: string): number {
-  const raw = NEPTUNE_PADDING + title.length * NEPTUNE_CHAR_WIDTH
-  return Math.min(NEPTUNE_MAX_WIDTH, Math.max(NEPTUNE_MIN_WIDTH, Math.round(raw)))
+export function nodeWidth(title: string): number {
+  const raw = PADDING + title.length * CHAR_WIDTH
+  return Math.max(MIN_WIDTH, Math.round(raw))
 }
 
 export interface Positioned {
@@ -31,52 +37,38 @@ export interface Positioned {
   y: number
   width: number
   height: number
-  /** Dagre rank (layout column). Drives the left-to-right stagger on entry. */
+  /** Dagre rank (layout row). Drives the staggered entry animation. */
   rank: number
-}
-
-export function nodeHeight(node: Pick<TaskNodeData, 'title' | 'detail'>): number {
-  const titleLines = Math.max(1, Math.ceil(node.title.length / TITLE_CHARS_PER_LINE))
-  return (
-    HEIGHT_BASE +
-    (titleLines - 1) * HEIGHT_TITLE_LINE +
-    (node.detail ? HEIGHT_DETAIL : 0)
-  )
 }
 
 /**
  * Run dagre over the graph and return absolute top-left positions.
  *
- * Nodes are fed in `sort_order` then `id` order, and edges in `id` order, so a
- * given graph always lays out identically -- stability across reloads is a
- * requirement, and dagre's output depends on insertion order.
+ * `edges` must be *every* edge that gets drawn, including the computed ones
+ * (`canvas.ts`'s `rootEdgesOf` / `parentEdgesOf`). Layout and drawing have to
+ * agree about which connections exist, so both take the same list rather than
+ * each deriving its own.
  *
- * `style` only changes the numbers fed to dagre (direction, spacing, node
- * dimensions) -- it never touches what gets drawn. That happens in app.css,
- * gated on the same `data-graph-style` attribute this value comes from.
+ * Nodes are fed in `app_id`, then `sort_order`, then `id` order, and edges in
+ * `id` order, so a given graph always lays out identically -- stability across
+ * reloads is a requirement, and dagre's output depends on insertion order.
+ * `app_id` leads because the overview draws every board at once: without it,
+ * six boards' `sort_order`s interleave and dagre shuffles the clusters
+ * together. On a single board every `app_id` is equal, so it changes nothing.
  */
 export function layoutGraph(
   nodes: TaskNodeData[],
   edges: GraphEdge[],
-  style: GraphStyle = 'blueprint',
 ): Map<number, Positioned> {
-  const vertical = style === 'neptune'
   const graph = new dagre.graphlib.Graph()
-  graph.setGraph(
-    vertical
-      ? { rankdir: 'TB', ranksep: 110, nodesep: 64, marginx: 48, marginy: 48 }
-      : { rankdir: 'LR', ranksep: 90, nodesep: 28, marginx: 24, marginy: 24 },
-  )
+  graph.setGraph({ rankdir: 'TB', ranksep: 110, nodesep: 64, marginx: 48, marginy: 48 })
   graph.setDefaultEdgeLabel(() => ({}))
 
   const ordered = [...nodes].sort(
-    (a, b) => a.sort_order - b.sort_order || a.id - b.id,
+    (a, b) => a.app_id - b.app_id || a.sort_order - b.sort_order || a.id - b.id,
   )
   for (const node of ordered) {
-    const dims = vertical
-      ? { width: neptuneNodeWidth(node.title), height: NEPTUNE_NODE_HEIGHT }
-      : { width: NODE_WIDTH, height: nodeHeight(node) }
-    graph.setNode(String(node.id), dims)
+    graph.setNode(String(node.id), { width: nodeWidth(node.title), height: NODE_HEIGHT })
   }
 
   const present = new Set(ordered.map((node) => node.id))
@@ -105,15 +97,14 @@ export function layoutGraph(
     }
   })
 
-  // Rank = layout column, i.e. position along whichever axis dagre ranks on --
-  // x for a left-to-right graph, y for a top-to-bottom one. Derived from the
-  // coordinate rather than read out of dagre's internals, which are not part
-  // of its public API.
-  const axis = (node: (typeof raw)[number]) => (vertical ? node.y : node.x)
-  const columns = [...new Set(raw.map((node) => Math.round(axis(node))))].sort(
+  // Rank = layout row, i.e. position along the axis dagre ranks on -- y, since
+  // the graph runs top-to-bottom. Derived from the coordinate rather than read
+  // out of dagre's internals, which are not part of its public API.
+  const axis = (node: (typeof raw)[number]) => node.y
+  const rows = [...new Set(raw.map((node) => Math.round(axis(node))))].sort(
     (a, b) => a - b,
   )
-  const rankOf = new Map(columns.map((value, index) => [value, index]))
+  const rankOf = new Map(rows.map((value, index) => [value, index]))
 
   return new Map(
     raw.map((node) => [

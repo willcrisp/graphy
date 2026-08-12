@@ -1,9 +1,8 @@
-/** The two-or-more-way button group shared by ModeToggle and GraphStyleToggle
- *  (and any future `chrome, not editing` switch of this shape): a row of
- *  `aria-pressed` buttons where exactly one is ever "on". The two callers
- *  differ only in their option list and labels, so that's all this takes as
- *  props -- the markup, the `mono` styling hook, and the roving `on` state
- *  live here once instead of twice. */
+/** The two-or-more-way button group behind ModeToggle (and any future
+ *  `chrome, not editing` switch of this shape): a row of `aria-pressed`
+ *  buttons where exactly one is ever "on". A caller differs only in its
+ *  option list and labels, so that's all this takes as props -- the markup,
+ *  the `mono` styling hook, and the roving `on` state live here. */
 
 interface Option<T extends string> {
   value: T

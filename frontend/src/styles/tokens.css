@@ -44,6 +44,19 @@
   font-display: swap;
   src: url('/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2') format('woff2');
 }
+/* Canvas node labels only. They are drawn in Montserrat, whose
+   wide geometric letterforms are the whole readability difference at this
+   size -- IBM Plex Sans Condensed is narrower per glyph and reads cramped.
+   Only the 600 face is loaded because only `.task__title` uses it: asking for
+   a weight with no file behind it makes the browser synthesize one, which
+   smears the strokes and undoes the point. */
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/montserrat-latin-600-normal.woff2') format('woff2');
+}
 
 :root {
   color-scheme: light;
@@ -89,6 +102,10 @@
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', monospace;
   --font-display: 'IBM Plex Sans Condensed', var(--font-sans);
+  /* Canvas node labels only -- see the @font-face above. Declared here with
+     the rest of the type scale rather than in the canvas block below, which
+     is deliberately colour-only. */
+  --font-label: 'Montserrat', var(--font-sans);
 
   --t-annotation: 0.6875rem; /* 11px, mono, tracked */
   --t-small: 0.8125rem; /* 13px */
@@ -164,54 +181,95 @@
 
    Both are re-derived on each element that carries the inline property:
    substitution happens where the declaration sits, so a single derivation at
-   :root would be frozen to the root's accent for every descendant. */
+   :root would be frozen to the root's accent for every descendant.
+
+   `.links__link` is on the list for the same reason: the parent panel lists
+   rows from several boards at once, so a row cannot inherit a single accent
+   from an ancestor and carries its own. Where nothing sets one inline they
+   just inherit, exactly as before. */
 :root,
 .canvas,
-.tab {
+.tab,
+.links__link {
   --accent-draw: var(--accent);
   --tab-accent-draw: var(--tab-accent);
 }
 
 :root[data-theme='dark'],
 [data-theme='dark'] .canvas,
-[data-theme='dark'] .tab {
+[data-theme='dark'] .tab,
+[data-theme='dark'] .links__link {
   --accent-draw: color-mix(in srgb, var(--accent), #fff 45%);
   --tab-accent-draw: color-mix(in srgb, var(--tab-accent), #fff 45%);
 }
 
-/* --- neptune graph style --------------------------------------------------
-   A second, independent attribute (data-graph-style, set by graphStyle.ts)
-   that reskins the canvas only -- topbar, panel and dialogs stay on whatever
-   light/dark theme is active. A fixed near-black ground is the one trait
-   that defines this look, so unlike the dark theme above it does not vary
-   with the light/dark toggle: these values apply regardless of --ground's
-   scope-level definition. Structural differences (vertical layout, wider
-   spacing, borderless nodes) live in layout.ts and app.css; this block is
-   colour only. */
-[data-graph-style='neptune'] .canvas {
-  --ground: #0a0f0d;
-  --surface: #121b17;
-  --grid: #17211d;
-  --ink: #dce6ec;
-  --ink-mute: #8a9aa1;
-  --rule: #1c2823;
-  --rule-strong: #2c3f36;
+/* --- canvas palette --------------------------------------------------------
+   The canvas has its own ground, one step greener and further from mid-grey
+   than the chrome around it -- topbar, panel and dialogs stay on the plain
+   light/dark theme. Structural decisions (vertical layout, spacing, borderless
+   nodes) live in layout.ts and app.css; these two blocks are colour only.
 
-  --st-done: #3fa38b;
-  --st-wip: #a78bfa;
-  --st-wip-ink: #a78bfa;
-  --st-todo: #7f92a1;
-  --st-todo-ink: #7f92a1;
-  --st-blocked: #e0645f;
+   Laid out light-first then overridden for dark, the same shape as :root and
+   :root[data-theme='dark'] above, so there is one place per theme to look. The
+   dark override is the later of two equally specific rules, so source order
+   here is what decides it -- keep them in this order. */
+.canvas {
+  --ground: #eef2f0;
+  --surface: #f7faf8;
+  --grid: #dde6e1;
+  --ink: #1a2b25;
+  --ink-mute: #5c6f68;
+  /* The label step, mirroring pure white in dark: one stop past --ink so the
+     node titles sit above every other mark on the canvas. */
+  --ink-strong: #08110e;
+  --rule: #ccd8d3;
+  /* Edges and the selection outline are drawn with this. Non-text, so it is
+     tuned to stay visible on --ground without competing with the labels. */
+  --rule-strong: #7f938c;
+
+  /* wip is violet here; the rest keep their hue and are darkened to clear
+     4.5:1 on --ground, because the status glyph is a text character and
+     carries the status on its own here. As in dark,
+     all four pass as drawn, so the -ink variants are aliases -- callers must
+     not have to know which theme or style is up. */
+  --st-done: #2f6b5e; /* 5.5:1 */
+  --st-wip: #5d3fb0; /* 6.6:1 */
+  --st-wip-ink: var(--st-wip);
+  --st-todo: #556472; /* 5.4:1 */
+  --st-todo-ink: var(--st-todo);
+  --st-blocked: #9b2c2c; /* 6.7:1 */
 
   /* `color` is a regular (non-custom) property: an element that never
      redeclares it inherits the *computed* value from its nearest ancestor
      that does, not a value re-resolved against this scope's --ink. Without
      this, anything under .canvas that relies on inherited colour (the title
      block's date/sheet values, its task count) would keep showing the outer
-     theme's ink -- dark-on-dark here. Redeclaring it right where --ink is
-     redefined is what makes the override actually reach descendants. */
+     theme's ink. Redeclaring it right where --ink is redefined is what makes
+     the override actually reach descendants. */
   color: var(--ink);
+}
+
+/* The near-black ground is the trait the look is built around, so it is kept
+   verbatim rather than derived from the light values above. */
+[data-theme='dark'] .canvas {
+  --ground: #0a0f0d;
+  --surface: #121b17;
+  --grid: #17211d;
+  --ink: #dce6ec;
+  --ink-mute: #8a9aa1;
+  /* Node labels are drawn at this step, not --ink: the reference sets them in
+     pure white, and the blue-grey --ink above reads dimmer against this
+     near-black ground. */
+  --ink-strong: #ffffff;
+  --rule: #1c2823;
+  --rule-strong: #2c3f36;
+
+  --st-done: #3fa38b;
+  --st-wip: #a78bfa;
+  --st-wip-ink: var(--st-wip);
+  --st-todo: #7f92a1;
+  --st-todo-ink: var(--st-todo);
+  --st-blocked: #e0645f;
 }
 
 @media (prefers-reduced-motion: reduce) {

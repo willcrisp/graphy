@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import Settings  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.main import create_app  # noqa: E402
-from app.models import App, Edge, Node  # noqa: E402
+from app.models import App, Edge, Node, Parent  # noqa: E402
 
 ADMIN_PASSWORD = "correct horse battery staple"
 
@@ -72,11 +72,22 @@ async def admin(client: AsyncClient) -> AsyncClient:
     return client
 
 
+async def make_parent(
+    session: AsyncSession, name: str = "Platform", detail: str | None = None, **kwargs
+) -> Parent:
+    parent = Parent(name=name, detail=detail, sort_order=kwargs.get("sort_order", 0))
+    session.add(parent)
+    await session.commit()
+    await session.refresh(parent)
+    return parent
+
+
 async def make_app(session: AsyncSession, key: str = "alpha", **kwargs) -> App:
     app = App(
         key=key,
         name=kwargs.get("name", key.title()),
         accent=kwargs.get("accent", "#1F5F8B"),
+        parent_id=kwargs.get("parent_id"),
         sort_order=kwargs.get("sort_order", 0),
     )
     session.add(app)

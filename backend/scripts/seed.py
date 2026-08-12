@@ -18,7 +18,25 @@ from sqlalchemy import delete, select  # noqa: E402
 
 from app.config import ConfigError, load_settings  # noqa: E402
 from app.db import Database  # noqa: E402
-from app.models import App, Edge, Node  # noqa: E402
+from app.models import App, Edge, Node, Parent  # noqa: E402
+
+# Parent projects, and which app keys hang off each. Two of the six apps are
+# deliberately left standalone -- an app is not required to have a parent, and
+# the overview has to look right when some of them don't.
+SEED_PARENTS: list[tuple[str, str, list[str]]] = [
+    (
+        "Observability",
+        "Everything that answers 'is it working, and if not, since when'. "
+        "One on-call rota covers all of it.",
+        ["atmosphere", "beacon"],
+    ),
+    (
+        "Data platform",
+        "The storage and movement layer the product teams build on. Shared "
+        "schema registry, shared connectors, one migration story.",
+        ["lattice", "ferry"],
+    ),
+]
 
 # Each app is (key, name, accent, [(local_id, title, status, detail)], [(src, dst)]).
 # Local ids are only meaningful inside one app's definition.
@@ -205,8 +223,9 @@ async def main() -> int:
     async with database.session() as session:
         if reset:
             await session.execute(delete(App))
+            await session.execute(delete(Parent))
             await session.commit()
-            print("seed: cleared existing apps")
+            print("seed: cleared existing apps and parent projects")
 
         for order, (key, name, accent, nodes, edges) in enumerate(SEED):
             existing = await session.scalar(select(App).where(App.key == key))
@@ -217,6 +236,9 @@ async def main() -> int:
             app = App(key=key, name=name, accent=accent, sort_order=order)
             session.add(app)
             await session.flush()
+            session.add(
+                Node(app_id=app.id, title=app.name, status="todo", is_root=True, sort_order=-1)
+            )
 
             ids: dict[str, int] = {}
             for position, (local, title, node_status, detail) in enumerate(nodes):
@@ -238,6 +260,21 @@ async def main() -> int:
 
             await session.commit()
             print(f"seed: {key} - {len(nodes)} nodes, {len(edges)} edges")
+
+        # Attached after the apps rather than alongside them, so a re-run that
+        # skipped every app still fixes up parents that were never linked.
+        for order, (name, detail, keys) in enumerate(SEED_PARENTS):
+            parent = await session.scalar(select(Parent).where(Parent.name == name))
+            if parent is None:
+                parent = Parent(name=name, detail=detail, sort_order=order)
+                session.add(parent)
+                await session.flush()
+            for key in keys:
+                app = await session.scalar(select(App).where(App.key == key))
+                if app is not None and app.parent_id is None:
+                    app.parent_id = parent.id
+            await session.commit()
+            print(f"seed: parent {name!r} - {len(keys)} apps")
 
     await database.dispose()
     print(f"seed: done ({settings.db_path})")

@@ -11,6 +11,8 @@ import type {
   EdgeMutation,
   Graph,
   NodeMutation,
+  Overview,
+  ParentMutation,
   Status,
 } from './types'
 
@@ -77,6 +79,7 @@ const json = (body: unknown): RequestInit['body'] => JSON.stringify(body)
 export const getConfig = () => request<AppConfig>('/config')
 export const getApps = () => request<AppSummary[]>('/apps')
 export const getGraph = (key: string) => request<Graph>(`/apps/${key}/graph`)
+export const getOverview = () => request<Overview>('/overview')
 
 export const login = (password: string) =>
   request<void>('/auth/login', { method: 'POST', body: json({ password }) })
@@ -99,6 +102,23 @@ export const renameApp = (key: string, name: string) =>
 
 export const deleteApp = (key: string) =>
   request<AppsPayload>(`/apps/${key}`, { method: 'DELETE' })
+
+// Parent-project mutations answer with the whole overview: what they change is
+// the structure between boards, so there is no single board to patch.
+
+export const createParent = (name: string, detail: string | null) =>
+  request<ParentMutation>('/parents', { method: 'POST', body: json({ name, detail }) })
+
+export const updateParent = (
+  id: number,
+  body: { name?: string; detail?: string | null },
+) => request<ParentMutation>(`/parents/${id}`, { method: 'PATCH', body: json(body) })
+
+export const deleteParent = (id: number) =>
+  request<Overview>(`/parents/${id}`, { method: 'DELETE' })
+
+export const setAppParent = (key: string, parent_id: number | null) =>
+  request<Overview>(`/apps/${key}/parent`, { method: 'PUT', body: json({ parent_id }) })
 
 export const createNode = (
   key: string,

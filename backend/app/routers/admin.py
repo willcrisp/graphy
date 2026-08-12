@@ -16,11 +16,12 @@ from fastapi import APIRouter, Depends, status
 
 from app.auth import require_admin, require_writable
 from app.deps import SessionDep
-from app.models import App, Edge, Node
+from app.models import App, Edge, Node, Parent
 from app.schemas import (
     AppCreate,
     AppMutationOut,
     AppOut,
+    AppParentUpdate,
     AppsOut,
     AppUpdate,
     BoardOut,
@@ -31,6 +32,11 @@ from app.schemas import (
     NodeMutationOut,
     NodeOut,
     NodeUpdate,
+    OverviewOut,
+    ParentCreate,
+    ParentMutationOut,
+    ParentOut,
+    ParentUpdate,
 )
 from app.services import graph as service
 
@@ -67,6 +73,51 @@ async def _edge_mutation(session: SessionDep, app_key: str, edge: Edge) -> EdgeM
     return EdgeMutationOut(
         edge=EdgeOut.model_validate(edge), graph=board.graph, apps=board.apps
     )
+
+
+async def _parent_mutation(session: SessionDep, parent: Parent) -> ParentMutationOut:
+    overview = await service.get_overview(session)
+    return ParentMutationOut(
+        parent=ParentOut.model_validate(parent),
+        parents=overview.parents,
+        apps=overview.apps,
+        nodes=overview.nodes,
+        edges=overview.edges,
+        last_updated=overview.last_updated,
+    )
+
+
+@router.post(
+    "/parents", response_model=ParentMutationOut, status_code=status.HTTP_201_CREATED
+)
+async def create_parent(body: ParentCreate, session: SessionDep) -> ParentMutationOut:
+    parent = await service.create_parent(session, name=body.name, detail=body.detail)
+    return await _parent_mutation(session, parent)
+
+
+@router.patch("/parents/{parent_id}", response_model=ParentMutationOut)
+async def update_parent(
+    parent_id: int, body: ParentUpdate, session: SessionDep
+) -> ParentMutationOut:
+    changes = body.model_dump(exclude_unset=True)
+    parent = await service.update_parent(session, parent_id, changes)
+    return await _parent_mutation(session, parent)
+
+
+@router.delete("/parents/{parent_id}", response_model=OverviewOut)
+async def delete_parent(parent_id: int, session: SessionDep) -> OverviewOut:
+    """Delete a parent project. The boards under it survive, detached."""
+    await service.delete_parent(session, parent_id)
+    return await service.get_overview(session)
+
+
+@router.put("/apps/{key}/parent", response_model=OverviewOut)
+async def set_app_parent(
+    key: str, body: AppParentUpdate, session: SessionDep
+) -> OverviewOut:
+    """Attach a board to a parent project, or detach it with `parent_id: null`."""
+    await service.set_app_parent(session, key, body.parent_id)
+    return await service.get_overview(session)
 
 
 @router.post("/apps", response_model=AppMutationOut, status_code=status.HTTP_201_CREATED)

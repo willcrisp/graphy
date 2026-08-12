@@ -4,43 +4,63 @@ import { ReactFlowProvider } from '@xyflow/react'
 import * as api from './api'
 import { ApiError } from './api'
 import AppDialog, { type DialogSpec } from './components/AppDialog'
-import AppTabs from './components/AppTabs'
+import AppTabs, { OVERVIEW_TAB } from './components/AppTabs'
 import ContextMenu, { type MenuItem, type MenuSpec } from './components/ContextMenu'
 import DetailPanel, { type SaveState } from './components/DetailPanel'
 import Graph from './components/Graph'
-import GraphStyleToggle from './components/GraphStyleToggle'
 import ModeToggle from './components/ModeToggle'
+import NodePopover from './components/NodePopover'
+import ParentPanel from './components/ParentPanel'
 import SignIn from './components/SignIn'
 import ThemeToggle from './components/ThemeToggle'
 import TitleBlock from './components/TitleBlock'
-import { useGraphStyle } from './graphStyle'
+import { buildBoard, buildOverview, parentIdOf } from './canvas'
 import * as optimistic from './optimistic'
 import { withCounts } from './optimistic'
 import { useTheme } from './theme'
-import type { AppConfig, AppSummary, Board, Graph as GraphData, Status } from './types'
+import type {
+  AppConfig,
+  AppSummary,
+  Board,
+  Graph as GraphData,
+  Overview,
+  Status,
+} from './types'
 import { STATUSES, STATUS_GLYPH, STATUS_LABEL, totalOf } from './types'
 import './styles/tokens.css'
 import './styles/app.css'
 
-/** The one stateful component. Owns the active app, its graph, selection,
+/** The one stateful component. Owns the current page, its data, selection,
  *  and every mutation; everything under `components/` is presentational,
  *  driven by props and callbacks from here. See `runMutation` below for the
- *  optimistic-patch-then-reconcile flow every edit goes through, and
+ *  optimistic-patch-then-reconcile flow every task edit goes through, and
  *  CLAUDE.md's "Every mutation is applied twice" for why. */
 
 const EDIT_MODE_KEY = 'blueprint.editMode'
 
-/** The URL carries the app key so a view is linkable. History API only. */
-function keyFromPath(): string | null {
-  const match = window.location.pathname.match(/^\/a\/([A-Za-z0-9_-]+)\/?$/)
-  return match ? match[1] : null
+/** The two pages. A board is one app; the overview is all of them on one
+ *  canvas, joined by their parent projects. They share the canvas, the tab
+ *  strip and the panel, and differ in what can be edited: tasks are edited on
+ *  their own board, parent projects only on the overview. */
+type Page = { kind: 'overview' } | { kind: 'board'; key: string }
+
+/** The URL carries the page so a view is linkable. History API only. */
+function pageFromPath(): Page | null {
+  const path = window.location.pathname
+  if (/^\/all\/?$/.test(path)) return { kind: 'overview' }
+  const match = path.match(/^\/a\/([A-Za-z0-9_-]+)\/?$/)
+  return match ? { kind: 'board', key: match[1] } : null
 }
+
+const pathOf = (page: Page): string =>
+  page.kind === 'overview' ? '/all' : `/a/${page.key}`
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [apps, setApps] = useState<AppSummary[]>([])
-  const [activeKey, setActiveKey] = useState<string | null>(keyFromPath())
+  const [page, setPage] = useState<Page | null>(pageFromPath())
   const [graph, setGraph] = useState<GraphData | null>(null)
+  const [overview, setOverview] = useState<Overview | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
   const [panelError, setPanelError] = useState<string | null>(null)
@@ -50,10 +70,17 @@ export default function App() {
   const [menu, setMenu] = useState<MenuSpec | null>(null)
   const [dialog, setDialog] = useState<DialogSpec | null>(null)
   const [theme, chooseTheme] = useTheme()
-  const [graphStyle, chooseGraphStyle] = useGraphStyle()
 
+  const isOverview = page?.kind === 'overview'
   const canEdit = Boolean(config && !config.readonly && config.authenticated)
   const showEditing = canEdit && editMode
+  // Tasks are edited on their own board. The overview is where the structure
+  // *between* boards is edited instead -- parent projects, and which boards
+  // hang off them -- so task chrome stays off there even in Edit mode.
+  const editingTasks = showEditing && !isOverview
+  // A view-mode click opens a node-anchored popover instead of the side
+  // panel; the panel is reserved for admin (edit) mode.
+  const usePopover = !showEditing
 
   // --- boot ---------------------------------------------------------------
 
@@ -62,10 +89,12 @@ export default function App() {
       .then(([nextConfig, nextApps]) => {
         setConfig(nextConfig)
         setApps(nextApps)
-        setActiveKey((current) => {
-          const wanted = current ?? keyFromPath()
-          const found = nextApps.find((app) => app.key === wanted)
-          return (found ?? nextApps[0])?.key ?? null
+        setPage((current) => {
+          const wanted = current ?? pageFromPath()
+          if (wanted?.kind === 'overview') return wanted
+          const found = nextApps.find((app) => app.key === wanted?.key)
+          const key = (found ?? nextApps[0])?.key
+          return key ? { kind: 'board', key } : null
         })
       })
       .catch((error: Error) => setBootError(error.message))
@@ -87,54 +116,82 @@ export default function App() {
     window.localStorage.setItem(EDIT_MODE_KEY, next ? 'edit' : 'view')
   }, [])
 
-  // --- app selection and URL sync -----------------------------------------
+  // --- navigation and URL sync --------------------------------------------
+
+  const go = useCallback((next: Page, push = true) => {
+    setPage(next)
+    setSelectedId(null)
+    setPanelError(null)
+    setMenu(null)
+    const path = pathOf(next)
+    if (push && window.location.pathname !== path) {
+      window.history.pushState({ path }, '', path)
+    }
+  }, [])
 
   const selectApp = useCallback(
-    (key: string, push = true) => {
-      setActiveKey(key)
-      setSelectedId(null)
-      setPanelError(null)
-      setMenu(null)
-      if (push && keyFromPath() !== key) {
-        window.history.pushState({ key }, '', `/a/${key}`)
-      }
-    },
-    [],
+    (key: string) => go({ kind: 'board', key }),
+    [go],
   )
+  const selectOverview = useCallback(() => go({ kind: 'overview' }), [go])
 
   useEffect(() => {
     function onPop() {
-      const key = keyFromPath()
-      if (key) selectApp(key, false)
+      const next = pageFromPath()
+      if (next) go(next, false)
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [selectApp])
+  }, [go])
 
-  // Put the resolved key in the URL when we landed on / or an unknown key.
+  // Put the resolved page in the URL when we landed on / or an unknown key.
   useEffect(() => {
-    if (activeKey && keyFromPath() !== activeKey) {
-      window.history.replaceState({ key: activeKey }, '', `/a/${activeKey}`)
+    if (page && window.location.pathname !== pathOf(page)) {
+      window.history.replaceState({ path: pathOf(page) }, '', pathOf(page))
     }
-  }, [activeKey])
+  }, [page])
 
-  // --- graph loading ------------------------------------------------------
+  // --- data loading -------------------------------------------------------
 
   useEffect(() => {
-    if (!activeKey) return
+    if (page?.kind !== 'board') return
+    const key = page.key
     let cancelled = false
     api
-      .getGraph(activeKey)
+      .getGraph(key)
       .then((next) => !cancelled && setGraph(next))
       .catch((error: Error) => !cancelled && setBootError(error.message))
     return () => {
       cancelled = true
     }
-  }, [activeKey])
+  }, [page])
+
+  /** Re-read the overview. Task edits happen on a board and return that board
+   *  alone, so the copy held here goes stale the moment one lands -- it is
+   *  re-fetched on arrival rather than patched from a board's response. */
+  const loadOverview = useCallback(async () => {
+    setOverview(await api.getOverview())
+  }, [])
 
   useEffect(() => {
-    document.title = graph ? `${graph.app.name} — Blueprint` : 'Blueprint'
-  }, [graph])
+    if (!isOverview) return
+    let cancelled = false
+    api
+      .getOverview()
+      .then((next) => !cancelled && setOverview(next))
+      .catch((error: Error) => !cancelled && setBootError(error.message))
+    return () => {
+      cancelled = true
+    }
+  }, [isOverview])
+
+  useEffect(() => {
+    document.title = isOverview
+      ? 'All projects — Blueprint'
+      : graph
+        ? `${graph.app.name} — Blueprint`
+        : 'Blueprint'
+  }, [graph, isOverview])
 
   /** Counts the mutations that have been started, so a reconcile or a rollback
    *  can tell whether it is still the newest one. */
@@ -205,30 +262,49 @@ export default function App() {
   // --- derived ------------------------------------------------------------
 
   const activeApp = useMemo(
-    () => apps.find((app) => app.key === activeKey) ?? null,
-    [apps, activeKey],
+    () => (page?.kind === 'board' ? apps.find((app) => app.key === page.key) ?? null : null),
+    [apps, page],
   )
+
+  /** What the canvas draws. Both pages are flattened to the same shape in
+   *  `canvas.ts`, so nothing below here has to ask which page it is on. */
+  const canvas = useMemo(() => {
+    if (isOverview) return overview ? buildOverview(overview) : null
+    return graph ? buildBoard(graph) : null
+  }, [isOverview, overview, graph])
+
   const selected = useMemo(
-    () => graph?.nodes.find((node) => node.id === selectedId) ?? null,
-    [graph, selectedId],
+    () => canvas?.nodes.find((node) => node.id === selectedId) ?? null,
+    [canvas, selectedId],
   )
+  const selectedParent = useMemo(() => {
+    if (selected?.kind !== 'parent' || !overview) return null
+    return overview.parents.find((p) => p.id === parentIdOf(selected.id)) ?? null
+  }, [selected, overview])
+
   const byId = useMemo(
-    () => new Map((graph?.nodes ?? []).map((node) => [node.id, node])),
-    [graph],
+    () => new Map((canvas?.nodes ?? []).map((node) => [node.id, node])),
+    [canvas],
   )
   const incoming = useMemo(
     () =>
-      (graph?.edges ?? [])
+      (canvas?.edges ?? [])
         .filter((edge) => edge.target_id === selectedId)
         .flatMap((edge) => byId.get(edge.source_id) ?? []),
-    [graph, selectedId, byId],
+    [canvas, selectedId, byId],
   )
   const outgoing = useMemo(
     () =>
-      (graph?.edges ?? [])
+      (canvas?.edges ?? [])
         .filter((edge) => edge.source_id === selectedId)
         .flatMap((edge) => byId.get(edge.target_id) ?? []),
-    [graph, selectedId, byId],
+    [canvas, selectedId, byId],
+  )
+
+  /** The boards under the selected parent project, for the panel to list. */
+  const childApps = useMemo(
+    () => (selectedParent ? apps.filter((app) => app.parent_id === selectedParent.id) : []),
+    [apps, selectedParent],
   )
 
   // --- actions ------------------------------------------------------------
@@ -254,7 +330,8 @@ export default function App() {
   }
 
   function addNode() {
-    if (!activeKey || !graph) return
+    if (page?.kind !== 'board' || !graph) return
+    const key = page.key
     const fields = { title: 'New task', status: 'todo' as Status }
     const draft = optimistic.draftNode(graph, fields)
 
@@ -262,7 +339,7 @@ export default function App() {
     setSelectedId(draft.id)
     void runMutation(
       (current) => optimistic.insertNode(current, draft),
-      () => api.createNode(activeKey, fields),
+      () => api.createNode(key, fields),
       // The temp row is gone by the time this runs; move the selection onto the
       // real one in the same batch, or the panel blanks for a frame.
       (result) => setSelectedId(result.node.id),
@@ -293,11 +370,12 @@ export default function App() {
   }
 
   function connect(source: number, target: number) {
-    if (!activeKey) return
+    if (page?.kind !== 'board') return
+    const key = page.key
     setSelectedId(target)
     void runMutation(
       (current) => optimistic.insertEdge(current, source, target),
-      () => api.createEdge(activeKey, source, target),
+      () => api.createEdge(key, source, target),
     )
   }
 
@@ -316,13 +394,14 @@ export default function App() {
     )
   }
 
-  // --- app-level actions --------------------------------------------------
+  // --- app- and parent-level actions --------------------------------------
   //
   // These deliberately bypass `runMutation`. It patches one board optimistically
   // and rolls that board back on failure, which has no meaning when the mutation
-  // creates or destroys boards -- and the dialog, not the panel, is where the
-  // error belongs. Each of these instead awaits the server and takes the tab
-  // strip it returns, letting the dialog surface any refusal.
+  // creates or destroys boards, or re-shapes which of them join to what -- and
+  // the dialog, not the panel, is where the error belongs. Each of these instead
+  // awaits the server and takes the state it returns, letting the dialog surface
+  // any refusal.
 
   function newApp() {
     setDialog({
@@ -333,7 +412,10 @@ export default function App() {
       onSubmit: async (name) => {
         const result = await api.createApp(name)
         setApps(result.apps)
-        selectApp(result.app.key)
+        // A new board joins the overview as a standalone cluster, so the copy
+        // held here is stale even though no parent changed.
+        if (isOverview) await loadOverview()
+        else selectApp(result.app.key)
       },
     })
   }
@@ -352,11 +434,12 @@ export default function App() {
         setApps(result.apps)
         // The graph carries its own copy of the app, so the title block and the
         // document title need the new name too.
-        if (key === activeKey) {
+        if (page?.kind === 'board' && key === page.key) {
           setGraph((current) =>
             current ? { ...current, app: { ...current.app, name: result.app.name } } : current,
           )
         }
+        if (isOverview) await loadOverview()
       },
     })
   }
@@ -377,28 +460,138 @@ export default function App() {
       onSubmit: async () => {
         const result = await api.deleteApp(key)
         setApps(result.apps)
-        // Deleting the board being viewed leaves nothing to draw; move to the
-        // first survivor. The service refuses to delete the last app, so there
-        // is always one.
-        if (key === activeKey && result.apps[0]) selectApp(result.apps[0].key)
+        if (isOverview) {
+          await loadOverview()
+        } else if (page?.kind === 'board' && key === page.key && result.apps[0]) {
+          // Deleting the board being viewed leaves nothing to draw; move to the
+          // first survivor. The service refuses to delete the last app, so there
+          // is always one.
+          selectApp(result.apps[0].key)
+        }
       },
     })
+  }
+
+  function newParent() {
+    setDialog({
+      title: 'New parent project',
+      body: 'A name and a description. Boards are attached to it afterwards.',
+      label: 'Name',
+      placeholder: 'Data platform',
+      detailLabel: 'Description',
+      detailPlaceholder: 'What these boards have in common.',
+      confirmLabel: 'Create parent project',
+      onSubmit: async (name, detail) => {
+        const result = await api.createParent(name, detail || null)
+        setOverview(result)
+        setApps(result.apps)
+        setSelectedId(null)
+      },
+    })
+  }
+
+  /** Saved from the panel, so it patches nothing optimistically: a rename
+   *  re-titles a node several boards hang off, and the overview it answers
+   *  with is the honest redraw. */
+  function saveParent(id: number, changes: { name?: string; detail?: string | null }) {
+    setPanelError(null)
+    setSaveState('saving')
+    api
+      .updateParent(id, changes)
+      .then((result) => {
+        setOverview(result)
+        setApps(result.apps)
+        setSaveState('saved')
+        window.setTimeout(() => setSaveState('idle'), 1600)
+      })
+      .catch((error: Error) => {
+        setSaveState('idle')
+        setPanelError(error.message)
+      })
+  }
+
+  /** The panel confirms inline, the way `DetailPanel` does for a task, so this
+   *  half is just the request. `removeParent` below is the same thing behind a
+   *  dialog, for the context menu where there is no panel to confirm in. */
+  function deleteParent(id: number) {
+    setSelectedId(null)
+    api
+      .deleteParent(id)
+      .then((result) => {
+        setOverview(result)
+        setApps(result.apps)
+      })
+      .catch((error: Error) => setPanelError(error.message))
+  }
+
+  function removeParent(id: number, name: string) {
+    const attached = apps.filter((app) => app.parent_id === id).length
+    setDialog({
+      title: `Delete ${name}?`,
+      body:
+        attached === 0
+          ? 'Nothing is attached to it. This cannot be undone.'
+          : `Its ${attached} board${attached === 1 ? '' : 's'} stay, standalone — ` +
+            'only the grouping goes. This cannot be undone.',
+      confirmLabel: 'Delete parent project',
+      danger: true,
+      onSubmit: async () => {
+        const result = await api.deleteParent(id)
+        setOverview(result)
+        setApps(result.apps)
+        setSelectedId(null)
+      },
+    })
+  }
+
+  async function setAppParent(key: string, parentId: number | null) {
+    setMenu(null)
+    try {
+      const result = await api.setAppParent(key, parentId)
+      setOverview(result)
+      setApps(result.apps)
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : 'That did not work.')
+    }
   }
 
   // --- context menus ------------------------------------------------------
 
   function nodeMenu(id: number, x: number, y: number) {
-    const task = graph?.nodes.find((node) => node.id === id)
-    if (!task) return
+    const node = canvas?.nodes.find((candidate) => candidate.id === id)
+    if (!node) return
     const groups: MenuItem[][] = [
       [{ label: 'Open details', mark: '›', onSelect: () => setSelectedId(id) }],
     ]
-    if (showEditing) {
+
+    if (node.kind === 'parent') {
+      if (showEditing) {
+        groups.push([
+          {
+            label: 'Delete parent project…',
+            mark: '×',
+            danger: true,
+            onSelect: () => removeParent(parentIdOf(id), node.title),
+          },
+        ])
+      }
+    } else if (node.kind === 'root' && isOverview) {
+      // The root stands for its board, so this is the natural place to open it.
+      const app = apps.find((candidate) => candidate.id === node.app_id)
+      if (app) {
+        groups[0].push({
+          label: `Open ${app.name}`,
+          mark: '→',
+          onSelect: () => selectApp(app.key),
+        })
+        if (showEditing) groups.push(parentChoices(app))
+      }
+    } else if (editingTasks) {
       groups.push(
         STATUSES.map((status) => ({
           label: `Mark ${STATUS_LABEL[status].toLowerCase()}`,
           mark: STATUS_GLYPH[status],
-          disabled: status === task.status,
+          disabled: status === node.status,
           onSelect: () =>
             void runMutation(
               (current) => optimistic.patchNode(current, id, { status }),
@@ -421,12 +614,33 @@ export default function App() {
         ],
       )
     }
-    setMenu({ x, y, heading: task.title, groups })
+    setMenu({ x, y, heading: node.title, groups })
+  }
+
+  /** "Which parent project does this board hang off" as a menu group: every
+   *  parent, plus the standalone option, with the current one disabled. */
+  function parentChoices(app: AppSummary): MenuItem[] {
+    const parents = overview?.parents ?? []
+    return [
+      ...parents.map((parent) => ({
+        label: `Move to ${parent.name}`,
+        mark: '⌂',
+        disabled: app.parent_id === parent.id,
+        onSelect: () => void setAppParent(app.key, parent.id),
+      })),
+      {
+        label: 'No parent project',
+        mark: '—',
+        disabled: app.parent_id === null,
+        onSelect: () => void setAppParent(app.key, null),
+      },
+      { label: 'New parent project…', mark: '+', onSelect: newParent },
+    ]
   }
 
   function edgeMenu(id: number, x: number, y: number) {
-    const edge = graph?.edges.find((candidate) => candidate.id === id)
-    if (!edge || !showEditing) return
+    const edge = canvas?.edges.find((candidate) => candidate.id === id)
+    if (!edge || !editingTasks) return
     const source = byId.get(edge.source_id)
     const target = byId.get(edge.target_id)
     if (!source || !target) return
@@ -463,6 +677,7 @@ export default function App() {
           { label: 'Rename app…', mark: '✎', onSelect: () => renameApp(key) },
           { label: 'New app…', mark: '+', onSelect: newApp },
         ],
+        parentChoices(app),
         [
           {
             label: 'Delete app…',
@@ -483,8 +698,12 @@ export default function App() {
     setMenu({
       x,
       y,
-      heading: graph?.app.name ?? 'Board',
-      groups: [[{ label: 'Add task', mark: '+', onSelect: addNode }]],
+      heading: isOverview ? 'All projects' : graph?.app.name ?? 'Board',
+      groups: [
+        isOverview
+          ? [{ label: 'New parent project…', mark: '+', onSelect: newParent }]
+          : [{ label: 'Add task', mark: '+', onSelect: addNode }],
+      ],
     })
   }
 
@@ -499,7 +718,7 @@ export default function App() {
     )
   }
 
-  if (!config || !activeApp || !graph) {
+  if (!config || !page || !canvas) {
     return (
       <main className="boot">
         <p className="boot__mark mono">Blueprint</p>
@@ -508,8 +727,10 @@ export default function App() {
     )
   }
 
+  const panelled = Boolean(selected) && !usePopover
+
   return (
-    <div className={`shell${selected ? ' shell--panelled' : ''}`}>
+    <div className={`shell${panelled ? ' shell--panelled' : ''}`}>
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__wordmark">Blueprint</span>
@@ -518,9 +739,10 @@ export default function App() {
         <div className="topbar__tabs">
           <AppTabs
             apps={apps}
-            activeKey={activeApp.key}
+            activeKey={isOverview ? null : activeApp?.key ?? null}
             editMode={showEditing}
             onSelect={selectApp}
+            onSelectOverview={selectOverview}
             onMenu={tabMenu}
             onAdd={newApp}
           />
@@ -528,9 +750,14 @@ export default function App() {
         <div className="topbar__actions">
           {canEdit ? (
             <>
-              {showEditing ? (
+              {editingTasks ? (
                 <button type="button" className="button button--primary" onClick={addNode}>
                   Add task
+                </button>
+              ) : null}
+              {showEditing && isOverview ? (
+                <button type="button" className="button button--primary" onClick={newParent}>
+                  New parent project
                 </button>
               ) : null}
               <ModeToggle editMode={editMode} onChange={changeMode} />
@@ -547,24 +774,22 @@ export default function App() {
               Sign in
             </button>
           )}
-          <GraphStyleToggle graphStyle={graphStyle} onChange={chooseGraphStyle} />
           <ThemeToggle theme={theme} onChange={chooseTheme} />
         </div>
       </header>
 
       <main
-        className="canvas"
+        className={`canvas${isOverview ? ' canvas--overview' : ''}`}
         id="canvas"
         role="tabpanel"
-        aria-labelledby={`tab-${activeApp.key}`}
-        style={{ '--accent': activeApp.accent } as React.CSSProperties}
+        aria-labelledby={`tab-${isOverview ? OVERVIEW_TAB : activeApp?.key}`}
+        style={{ '--accent': activeApp?.accent ?? 'var(--st-todo)' } as React.CSSProperties}
       >
         <ReactFlowProvider>
           <Graph
-            key={activeApp.key}
-            graph={graph}
-            graphStyle={graphStyle}
-            editMode={showEditing}
+            key={canvas.key}
+            graph={canvas}
+            editMode={editingTasks}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onConnect={connect}
@@ -575,17 +800,35 @@ export default function App() {
           />
         </ReactFlowProvider>
         <TitleBlock
-          app={graph.app}
-          counts={activeApp.counts}
-          lastUpdated={graph.last_updated}
+          app={isOverview ? null : graph?.app ?? null}
+          apps={apps}
+          counts={isOverview ? null : activeApp?.counts ?? null}
+          parentCount={overview?.parents.length ?? 0}
+          lastUpdated={(isOverview ? overview?.last_updated : graph?.last_updated) ?? null}
         />
       </main>
 
-      {selected ? (
+      {selectedParent && panelled ? (
+        <ParentPanel
+          key={selectedParent.id}
+          parent={selectedParent}
+          apps={childApps}
+          editable={showEditing}
+          saveState={saveState}
+          error={panelError}
+          onSave={(changes) => saveParent(selectedParent.id, changes)}
+          onDelete={() => deleteParent(selectedParent.id)}
+          onDetach={(key) => void setAppParent(key, null)}
+          onOpenApp={selectApp}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
+
+      {selected && !selectedParent && panelled ? (
         <DetailPanel
           key={selected.id}
           task={selected}
-          editable={showEditing}
+          editable={editingTasks}
           saveState={saveState}
           error={panelError}
           incoming={incoming}
@@ -596,6 +839,10 @@ export default function App() {
           onClose={() => setSelectedId(null)}
           onSelectTask={setSelectedId}
         />
+      ) : null}
+
+      {selected && usePopover ? (
+        <NodePopover key={selected.id} task={selected} onClose={() => setSelectedId(null)} />
       ) : null}
 
       {menu ? <ContextMenu menu={menu} onClose={() => setMenu(null)} /> : null}

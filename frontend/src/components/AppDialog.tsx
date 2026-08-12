@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal'
 
-/** One dialog for the three app-level actions. `label` present means it asks
- *  for a name; absent means it only asks for a yes -- deleting an app takes its
- *  whole graph with it, which is the one destructive action worth a stop. */
+/** One dialog for every app- and parent-level action. `label` present means it
+ *  asks for a name; absent means it only asks for a yes -- deleting an app
+ *  takes its whole graph with it, which is the one destructive action worth a
+ *  stop. `detailLabel` adds a second, optional field: a parent project is a
+ *  name *and* a description, and asking for both at once beats creating it
+ *  blank and immediately editing it. */
 export interface DialogSpec {
   title: string
   body?: string
   label?: string
   initial?: string
   placeholder?: string
+  detailLabel?: string
+  detailInitial?: string
+  detailPlaceholder?: string
   confirmLabel: string
   danger?: boolean
-  onSubmit: (value: string) => Promise<void>
+  onSubmit: (value: string, detail: string) => Promise<void>
 }
 
 interface Props {
@@ -22,6 +28,7 @@ interface Props {
 
 export default function AppDialog({ dialog, onClose }: Props) {
   const [value, setValue] = useState(dialog.initial ?? '')
+  const [detail, setDetail] = useState(dialog.detailInitial ?? '')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const input = useRef<HTMLInputElement>(null)
@@ -47,7 +54,7 @@ export default function AppDialog({ dialog, onClose }: Props) {
     setBusy(true)
     setError(null)
     try {
-      await dialog.onSubmit(value.trim())
+      await dialog.onSubmit(value.trim(), detail.trim())
       onClose()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'That did not work.')
@@ -80,6 +87,19 @@ export default function AppDialog({ dialog, onClose }: Props) {
               maxLength={128}
               placeholder={dialog.placeholder}
               onChange={(event) => setValue(event.target.value)}
+            />
+          </label>
+        ) : null}
+        {dialog.detailLabel ? (
+          <label className="field">
+            <span className="field__label mono">{dialog.detailLabel}</span>
+            <textarea
+              className="field__input field__input--area"
+              value={detail}
+              rows={4}
+              maxLength={2000}
+              placeholder={dialog.detailPlaceholder}
+              onChange={(event) => setDetail(event.target.value)}
             />
           </label>
         ) : null}

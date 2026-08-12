@@ -40,7 +40,9 @@ export function countsOf(nodes: TaskNodeData[]): StatusCounts {
   // Every status is present at zero: the tab strip renders all four, and an
   // absent key would read as a missing count rather than none.
   const counts: StatusCounts = { done: 0, wip: 0, todo: 0, blocked: 0 }
-  for (const node of nodes) counts[node.status] += 1
+  // Mirrors services/graph.py's list_apps tally: the root node's status is
+  // filler, not a real task, so it must not count.
+  for (const node of nodes) if (!node.is_root) counts[node.status] += 1
   return counts
 }
 
@@ -67,6 +69,8 @@ export function draftNode(
     status: fields.status,
     // The UI never sets this itself -- only an importer does, over the API.
     external_ref: null,
+    // The UI never creates root nodes -- only create_app does, server-side.
+    is_root: false,
     // Matches `create_node`: highest sort_order on the app, plus one. Layout
     // order depends on this, so a wrong guess would move the node on reconcile.
     sort_order: Math.max(0, ...graph.nodes.map((n) => n.sort_order)) + 1,

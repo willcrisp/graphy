@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NODE_WIDTH, layoutGraph, neptuneNodeWidth, nodeHeight } from './layout'
+import { NODE_HEIGHT, layoutGraph, nodeWidth } from './layout'
 import type { TaskNodeData, GraphEdge, Status } from './types'
 
 let nextId = 1
@@ -13,6 +13,7 @@ function node(title: string, detail: string | null = null): TaskNodeData {
     detail,
     status: 'todo' as Status,
     external_ref: null,
+    is_root: false,
     sort_order: id,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -23,26 +24,22 @@ function edge(source: TaskNodeData, target: TaskNodeData, id = nextId++): GraphE
   return { id, app_id: 1, source_id: source.id, target_id: target.id }
 }
 
-describe('nodeHeight', () => {
-  it('is taller when a detail paragraph is present', () => {
-    const short = node('Ingest')
-    expect(nodeHeight({ ...short, detail: 'Some detail.' })).toBeGreaterThan(
-      nodeHeight(short),
-    )
-  })
-
-  it('grows with a title that must wrap', () => {
-    expect(nodeHeight(node('A very long task title that certainly wraps over lines'))).
-      toBeGreaterThan(nodeHeight(node('Short')))
+describe('nodeWidth', () => {
+  it('grows with the label and never caps it', () => {
+    expect(nodeWidth('AB')).toBeLessThan(nodeWidth('A much longer task title'))
+    expect(nodeWidth('')).toBeGreaterThanOrEqual(84)
+    // No upper clamp: a long title must get a box wide enough to show it all,
+    // because nothing downstream truncates.
+    expect(nodeWidth('X'.repeat(200))).toBeGreaterThan(200 * 10)
   })
 })
 
 describe('layoutGraph ordering', () => {
-  it('places a dependency to the left of its dependant', () => {
+  it('stacks a dependency below its dependant', () => {
     const a = node('A')
     const b = node('B')
     const positions = layoutGraph([a, b], [edge(a, b)])
-    expect(positions.get(a.id)!.x).toBeLessThan(positions.get(b.id)!.x)
+    expect(positions.get(a.id)!.y).toBeLessThan(positions.get(b.id)!.y)
   })
 
   it('assigns increasing ranks along a chain', () => {
@@ -53,13 +50,13 @@ describe('layoutGraph ordering', () => {
     expect(positions.get(c.id)!.rank).toBe(2)
   })
 
-  it('puts siblings in the same rank but separated vertically', () => {
+  it('puts siblings in the same rank but separated horizontally', () => {
     const [root, left, right] = [node('root'), node('left'), node('right')]
     const positions = layoutGraph([root, left, right], [edge(root, left), edge(root, right)])
     const l = positions.get(left.id)!
     const r = positions.get(right.id)!
     expect(l.rank).toBe(r.rank)
-    expect(Math.abs(l.y - r.y)).toBeGreaterThanOrEqual(28)
+    expect(Math.abs(l.x - r.x)).toBeGreaterThanOrEqual(28)
   })
 
   it('collapses a diamond so the join sits past both arms', () => {
@@ -89,7 +86,7 @@ describe('layoutGraph ordering', () => {
     const nodes = [node('lonely'), node('also lonely'), node('third')]
     const positions = layoutGraph(nodes, [])
     expect(positions.size).toBe(3)
-    for (const n of nodes) expect(positions.get(n.id)!.width).toBe(NODE_WIDTH)
+    for (const n of nodes) expect(positions.get(n.id)!.height).toBe(NODE_HEIGHT)
   })
 
   it('ignores edges pointing at nodes that are not in the set', () => {
@@ -104,45 +101,13 @@ describe('layoutGraph ordering', () => {
   })
 })
 
-describe('layoutGraph neptune style', () => {
-  it('defaults to the blueprint style when none is given', () => {
-    const [a, b] = [node('A'), node('B')]
-    const withoutStyle = layoutGraph([a, b], [edge(a, b)])
-    const withBlueprint = layoutGraph([a, b], [edge(a, b)], 'blueprint')
-    expect(withoutStyle).toEqual(withBlueprint)
-  })
-
-  it('stacks a dependency below its dependant instead of to its right', () => {
-    const a = node('A')
-    const b = node('B')
-    const positions = layoutGraph([a, b], [edge(a, b)], 'neptune')
-    expect(positions.get(a.id)!.y).toBeLessThan(positions.get(b.id)!.y)
-  })
-
-  it('ranks along y rather than x', () => {
-    const [a, b, c] = [node('A'), node('B'), node('C')]
-    const positions = layoutGraph([a, b, c], [edge(a, b), edge(b, c)], 'neptune')
-    expect(positions.get(a.id)!.rank).toBe(0)
-    expect(positions.get(b.id)!.rank).toBe(1)
-    expect(positions.get(c.id)!.rank).toBe(2)
-  })
-
-  it('sizes nodes to the label instead of a fixed card width', () => {
+describe('layoutGraph sizing', () => {
+  it('sizes nodes to the label rather than to a fixed card width', () => {
     const positions = layoutGraph(
       [node('AB'), node('A rather longer title than that one')],
       [],
-      'neptune',
     )
     const [short, long] = [...positions.values()].sort((a, b) => a.width - b.width)
     expect(short.width).toBeLessThan(long.width)
-    expect(short.width).not.toBe(NODE_WIDTH)
-  })
-})
-
-describe('neptuneNodeWidth', () => {
-  it('grows with the label and stays within its clamp', () => {
-    expect(neptuneNodeWidth('AB')).toBeLessThan(neptuneNodeWidth('A much longer task title'))
-    expect(neptuneNodeWidth('')).toBeGreaterThanOrEqual(84)
-    expect(neptuneNodeWidth('X'.repeat(200))).toBeLessThanOrEqual(220)
   })
 })

@@ -66,6 +66,13 @@ boundary.
   creation (from the name, de-duplicated by suffix) and never changes, so
   links keep working after a rename. `accent` is a stored hex colour, cycled
   from a fixed palette (`ACCENTS` in `services/graph.py`) unless one is given.
+  `parent_id` is optional and points at a parent project.
+- **Parent** ("parent project" user-facing) — a `name` (unique,
+  case-insensitively) and a `detail`, and nothing else: no status, no tasks, no
+  edges. Several apps may point at the same one, which is what joins otherwise
+  independent boards on the overview canvas. Deleting one detaches its apps
+  (`ON DELETE SET NULL`) and never deletes a board. Deliberately flat — a
+  parent has no parent.
 - **Node** ("task" everywhere user-facing) — belongs to exactly one app.
   `external_ref` is an opaque string, unique per app, meant for an external
   importer to recognise a node it already created (see `docs/API.md`'s sibling
@@ -84,6 +91,8 @@ boundary.
 | `GET /api/health` | — | `{"status": "ok"}` |
 | `GET /api/apps` | — | `AppSummary[]` — every app plus its per-status task counts |
 | `GET /api/apps/{key}/graph` | — | `GraphOut` — `{app, nodes, edges, last_updated}` for one board |
+| `GET /api/parents` | — | `ParentOut[]` — every parent project |
+| `GET /api/overview` | — | `OverviewOut` — `{parents, apps, nodes, edges, last_updated}`: every board at once, told apart by `app_id` |
 | `GET /api/config` | — | `{"readonly": bool, "authenticated": bool}` |
 | `GET /api/agent-instructions` | — | `text/markdown` — the import-focused guide, not JSON |
 
@@ -102,23 +111,32 @@ reconciles against exactly this response, so there is never a second request
 after a write. `BoardOut` is `{graph, apps}`; the mutation-specific types below
 add the one row that was written.
 
+The parent-project endpoints follow the same rule one level up: what they
+change is the structure *between* boards, so they answer with the whole
+`OverviewOut` rather than any single board.
+
 | Method & path | Request body | Response |
 |---|---|---|
 | `POST /api/apps` | `{"name": string, "accent"?: "#rrggbb"}` | `AppMutationOut` = `{app, apps}` |
 | `PATCH /api/apps/{key}` | `{"name": string}` | `AppMutationOut` = `{app, apps}` |
 | `DELETE /api/apps/{key}` | — | `AppsOut` = `{apps}` — 422 if it's the only app |
+| `PUT /api/apps/{key}/parent` | `{"parent_id": int\|null}` | `OverviewOut` — `null` detaches; an unknown id is 404 and the board is left alone |
+| `POST /api/parents` | `{"name": string, "detail"?: string\|null}` | `ParentMutationOut` = `OverviewOut` + `{parent}` |
+| `PATCH /api/parents/{id}` | `{"name"?, "detail"?}`, same `exclude_unset` rule as `PATCH /api/nodes/{id}` | `ParentMutationOut` |
+| `DELETE /api/parents/{id}` | — | `OverviewOut` — detaches its apps, never deletes a board |
 | `POST /api/apps/{key}/nodes` | `{"title": string, "detail"?: string\|null, "status": Status, "external_ref"?: string\|null}` | `NodeMutationOut` = `{node, graph, apps}` |
 | `PATCH /api/nodes/{id}` | Same fields as create, all optional — **only fields present in the JSON body are touched** (`model_dump(exclude_unset=True)`); an explicit `"detail": null` clears it, an absent `detail` leaves it alone | `NodeMutationOut` = `{node, graph, apps}` |
 | `DELETE /api/nodes/{id}` | — | `BoardOut` = `{graph, apps}` — cascades the node's edges; does **not** reparent its children, they become layout roots |
 | `POST /api/apps/{key}/edges` | `{"source_id": int, "target_id": int}` | `EdgeMutationOut` = `{edge, graph, apps}` |
 | `DELETE /api/edges/{id}` | — | `BoardOut` = `{graph, apps}` |
 
-`AppSummary` = `AppOut` (`{id, key, name, accent, sort_order}`) plus
+`AppSummary` = `AppOut` (`{id, key, name, accent, parent_id, sort_order}`) plus
 `counts: {done, wip, todo, blocked}`. `NodeOut` adds `id, app_id, title,
 detail, status, external_ref, sort_order, created_at, updated_at` (timestamps
 are UTC, always timezone-aware in the response even though SQLite stores them
 naive — see `_as_utc` in `schemas.py`). `EdgeOut` is `{id, app_id, source_id,
-target_id}`.
+target_id}`. `ParentOut` is `{id, name, detail, sort_order, created_at,
+updated_at}`.
 
 ## Field validation
 
@@ -132,6 +150,8 @@ or the database:
 - `status`: must be one of the four values above.
 - App `name`: 1–128 chars, trimmed. `accent`, if given, must match
   `^#[0-9A-Fa-f]{6}$`.
+- Parent `name`: 1–128 chars, trimmed; `detail` follows the same rule as a
+  node's.
 
 ## Invariants (checked in `services/graph.py`, not the routers)
 
@@ -144,6 +164,8 @@ or the database:
   *and* by a DB unique constraint (`uq_node_app_external_ref`), so a race
   can't surface as a raw 500.
 - The last app in the database cannot be deleted.
+- Parent project names are unique, compared case-insensitively in the service
+  layer (so the refusal is a sentence) with a DB unique constraint behind it.
 
 Every rule here applies identically to HTTP traffic, `scripts/seed.py`, and
 the test suite — routers never validate independently, they just translate

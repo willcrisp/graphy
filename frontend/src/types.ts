@@ -42,7 +42,23 @@ export interface AppInfo {
   key: string
   name: string
   accent: string
+  /** The parent project this board hangs off, or null for a standalone board.
+   *  Only the overview canvas draws anything with it -- a board's own page
+   *  looks the same either way. */
+  parent_id: number | null
   sort_order: number
+}
+
+/** The one thing that sits above an app: a name and a description, no status
+ *  and no tasks of its own. Several apps can point at the same one, which is
+ *  what joins otherwise-independent boards on the overview canvas. */
+export interface ParentProject {
+  id: number
+  name: string
+  detail: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
 }
 
 export interface AppSummary extends AppInfo {
@@ -68,6 +84,10 @@ export interface TaskNodeData {
   /** Opaque id from whatever external system created this task (e.g. a Jira
    *  key). Set by an importer, never by the UI -- read-only here. */
   external_ref: string | null
+  /** True for exactly one node per app: the root, standing in for the app
+   *  itself. Created alongside the app, renamed only by renaming the app,
+   *  and never created/edited/deleted through the ordinary task UI. */
+  is_root: boolean
   sort_order: number
   created_at: string
   updated_at: string
@@ -92,6 +112,24 @@ export interface Graph {
 export interface Board {
   graph: Graph
   apps: AppSummary[]
+}
+
+/** Every board at once, the read behind the overview page. Nodes and edges
+ *  arrive in one flat list and are told apart by `app_id`; there is no per-app
+ *  envelope, because the canvas lays them all out in a single dagre pass. */
+export interface Overview {
+  parents: ParentProject[]
+  apps: AppSummary[]
+  nodes: TaskNodeData[]
+  edges: GraphEdge[]
+  last_updated: string | null
+}
+
+/** Parent mutations answer with the whole overview for the same reason app
+ *  mutations answer with the whole tab strip: what changed is the structure
+ *  between boards, not the contents of any one of them. */
+export interface ParentMutation extends Overview {
+  parent: ParentProject
 }
 
 export interface NodeMutation extends Board {

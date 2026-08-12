@@ -87,7 +87,16 @@ export default function DetailPanel({
       </header>
 
       <div className="panel__scroll">
-        {editable ? (
+        {task.is_root ? (
+          <>
+            <p className="panel__status mono">Root</p>
+            <h2 className="panel__title">{task.title}</h2>
+            <p className="panel__detail panel__detail--empty">
+              The app itself, standing at the top of the board. Renamed by
+              renaming the app; it has no status or connections of its own.
+            </p>
+          </>
+        ) : editable ? (
           <>
             <label className="field">
               <span className="field__label mono">Title</span>
@@ -188,7 +197,7 @@ export default function DetailPanel({
           </p>
         ) : null}
 
-        {editable ? (
+        {editable && !task.is_root ? (
           <div className="panel__danger">
             {confirmingDelete ? (
               <>

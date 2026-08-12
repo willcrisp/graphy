@@ -109,14 +109,8 @@ identically across reloads.
 
 **Editing is direct.** Click a node to open the side panel; in Edit mode the fields
 become editable and save on blur. New nodes appear unconnected — drag from a node's
-right handle to another node's left handle to connect them. Deleting is behind a
+bottom handle to another node's top handle to connect them. Deleting is behind a
 confirm step, never a keyboard shortcut.
-
-**Two independent ways to draw the same graph.** The style toggle switches between
-Blueprint (bordered cards, right-angle edges, horizontal layout) and Neptune (a
-vertical layout of borderless glyph-and-label nodes with flowing curved edges). It's
-orthogonal to the light/dark theme — either style combines with either theme — and
-only changes the canvas; the topbar and panel look the same in both.
 
 **The graph can't tie itself in knots.** Edges that would cross between apps, point a
 node at itself, duplicate an existing link, or close a loop are all rejected, and the
@@ -264,8 +258,7 @@ frontend/
   src/
     layout.ts           dagre wrapper; node dimensions computed, not measured
     theme.ts             light/dark resolution and persistence
-    graphStyle.ts        blueprint/neptune resolution and persistence
-    persistedChoice.ts   the localStorage hook wiring theme.ts and graphStyle.ts share
+    persistedChoice.ts   the localStorage hook behind theme.ts
     optimistic.ts        local mutation of the graph, mirrors services/graph.py
     api.ts               typed client, flattens server errors to one sentence
     components/          Graph, TaskNode, AppTabs, DetailPanel, TitleBlock, Modal,
