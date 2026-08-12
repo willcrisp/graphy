@@ -189,9 +189,37 @@ async def delete_app(session: AsyncSession, key: str) -> None:
 # --- node mutations --------------------------------------------------------
 
 
+async def _check_external_ref_free(
+    session: AsyncSession, app_id: int, external_ref: str, *, exclude_node_id: int | None = None
+) -> None:
+    """`external_ref` is how an importer (e.g. an agent syncing Jira tickets)
+    recognises a node it already created, so it must be unique per app -- the
+    same collision the DB's unique constraint enforces, checked here first so
+    the failure reads as a sentence instead of an IntegrityError."""
+    query = select(Node).where(
+        Node.app_id == app_id, Node.external_ref == external_ref
+    )
+    if exclude_node_id is not None:
+        query = query.where(Node.id != exclude_node_id)
+    existing = await session.scalar(query)
+    if existing is not None:
+        raise GraphError(
+            f"external_ref {external_ref!r} is already used by task "
+            f"{existing.title!r} in this app."
+        )
+
+
 async def create_node(
-    session: AsyncSession, app: App, *, title: str, detail: str | None, status: str
+    session: AsyncSession,
+    app: App,
+    *,
+    title: str,
+    detail: str | None,
+    status: str,
+    external_ref: str | None = None,
 ) -> Node:
+    if external_ref is not None:
+        await _check_external_ref_free(session, app.id, external_ref)
     highest = await session.scalar(
         select(func.max(Node.sort_order)).where(Node.app_id == app.id)
     )
@@ -200,6 +228,7 @@ async def create_node(
         title=title,
         detail=detail,
         status=status,
+        external_ref=external_ref,
         sort_order=(highest or 0) + 1,
     )
     session.add(node)
@@ -212,6 +241,11 @@ async def update_node(
     session: AsyncSession, node_id: int, changes: dict[str, object]
 ) -> Node:
     node = await get_node(session, node_id)
+    external_ref = changes.get("external_ref")
+    if external_ref is not None:
+        await _check_external_ref_free(
+            session, node.app_id, external_ref, exclude_node_id=node.id
+        )
     for field, value in changes.items():
         setattr(node, field, value)
     await session.commit()

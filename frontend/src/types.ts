@@ -1,3 +1,9 @@
+/** Shapes shared between the API client (`api.ts`), the optimistic patcher
+ *  (`optimistic.ts`), and every component. Mirrors `schemas.py` field for
+ *  field -- if a response shape changes on the backend, this is the first
+ *  place to update, and the compiler will point at everything downstream
+ *  that needs to follow. */
+
 export const STATUSES = ['done', 'wip', 'todo', 'blocked'] as const
 export type Status = (typeof STATUSES)[number]
 
@@ -23,6 +29,13 @@ export interface StatusCounts {
   todo: number
   blocked: number
 }
+
+/** The one place that sums a `StatusCounts` -- the tab strip, the delete-app
+ *  confirmation, and the title block all need "how many tasks", and summing
+ *  the four fields by hand in three places is exactly the kind of thing that
+ *  silently drifts if a fifth status is ever added. */
+export const totalOf = (counts: StatusCounts): number =>
+  STATUSES.reduce((sum, status) => sum + counts[status], 0)
 
 export interface AppInfo {
   id: number
@@ -52,6 +65,9 @@ export interface TaskNodeData {
   title: string
   detail: string | null
   status: Status
+  /** Opaque id from whatever external system created this task (e.g. a Jira
+   *  key). Set by an importer, never by the UI -- read-only here. */
+  external_ref: string | null
   sort_order: number
   created_at: string
   updated_at: string

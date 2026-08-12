@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Modal from './Modal'
 
 /** One dialog for the three app-level actions. `label` present means it asks
  *  for a name; absent means it only asks for a yes -- deleting an app takes its
@@ -56,11 +57,7 @@ export default function AppDialog({ dialog, onClose }: Props) {
   }
 
   return (
-    <div
-      className="scrim"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-      onKeyDown={(event) => event.key === 'Escape' && onClose()}
-    >
+    <Modal onClose={onClose}>
       <form
         className="signin"
         onSubmit={submit}
@@ -105,6 +102,6 @@ export default function AppDialog({ dialog, onClose }: Props) {
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

@@ -1,7 +1,14 @@
+import ToggleGroup from './ToggleGroup'
+
 interface Props {
   editMode: boolean
   onChange: (editMode: boolean) => void
 }
+
+const OPTIONS = [
+  { value: 'view', label: 'view' },
+  { value: 'edit', label: 'edit' },
+] as const
 
 /**
  * Purely client-side. It only controls whether editing chrome is shown, so an
@@ -10,21 +17,11 @@ interface Props {
  */
 export default function ModeToggle({ editMode, onChange }: Props) {
   return (
-    <div className="modetoggle" role="group" aria-label="Board mode">
-      {(['view', 'edit'] as const).map((mode) => {
-        const on = (mode === 'edit') === editMode
-        return (
-          <button
-            key={mode}
-            type="button"
-            className={`modetoggle__option mono${on ? ' modetoggle__option--on' : ''}`}
-            aria-pressed={on}
-            onClick={() => onChange(mode === 'edit')}
-          >
-            {mode}
-          </button>
-        )
-      })}
-    </div>
+    <ToggleGroup
+      ariaLabel="Board mode"
+      value={editMode ? 'edit' : 'view'}
+      options={OPTIONS}
+      onChange={(mode) => onChange(mode === 'edit')}
+    />
   )
 }

@@ -8,17 +8,25 @@ import AppTabs from './components/AppTabs'
 import ContextMenu, { type MenuItem, type MenuSpec } from './components/ContextMenu'
 import DetailPanel, { type SaveState } from './components/DetailPanel'
 import Graph from './components/Graph'
+import GraphStyleToggle from './components/GraphStyleToggle'
 import ModeToggle from './components/ModeToggle'
 import SignIn from './components/SignIn'
 import ThemeToggle from './components/ThemeToggle'
 import TitleBlock from './components/TitleBlock'
+import { useGraphStyle } from './graphStyle'
 import * as optimistic from './optimistic'
 import { withCounts } from './optimistic'
 import { useTheme } from './theme'
 import type { AppConfig, AppSummary, Board, Graph as GraphData, Status } from './types'
-import { STATUSES, STATUS_GLYPH, STATUS_LABEL } from './types'
+import { STATUSES, STATUS_GLYPH, STATUS_LABEL, totalOf } from './types'
 import './styles/tokens.css'
 import './styles/app.css'
+
+/** The one stateful component. Owns the active app, its graph, selection,
+ *  and every mutation; everything under `components/` is presentational,
+ *  driven by props and callbacks from here. See `runMutation` below for the
+ *  optimistic-patch-then-reconcile flow every edit goes through, and
+ *  CLAUDE.md's "Every mutation is applied twice" for why. */
 
 const EDIT_MODE_KEY = 'blueprint.editMode'
 
@@ -42,6 +50,7 @@ export default function App() {
   const [menu, setMenu] = useState<MenuSpec | null>(null)
   const [dialog, setDialog] = useState<DialogSpec | null>(null)
   const [theme, chooseTheme] = useTheme()
+  const [graphStyle, chooseGraphStyle] = useGraphStyle()
 
   const canEdit = Boolean(config && !config.readonly && config.authenticated)
   const showEditing = canEdit && editMode
@@ -224,16 +233,23 @@ export default function App() {
 
   // --- actions ------------------------------------------------------------
 
+  /** `/api/config` is the one source of truth for `authenticated`; both
+   *  sign-in and sign-out re-read it rather than assuming their own request
+   *  succeeded means the session is now in the state they expect. */
+  async function refreshConfig() {
+    setConfig(await api.getConfig())
+  }
+
   async function signIn(password: string) {
     await api.login(password)
-    setConfig(await api.getConfig())
+    await refreshConfig()
     setSigningIn(false)
     changeMode(true)
   }
 
   async function signOut() {
     await api.logout()
-    setConfig(await api.getConfig())
+    await refreshConfig()
     setEditMode(false)
   }
 
@@ -348,8 +364,7 @@ export default function App() {
   function removeApp(key: string) {
     const app = apps.find((candidate) => candidate.key === key)
     if (!app) return
-    const total =
-      app.counts.done + app.counts.wip + app.counts.todo + app.counts.blocked
+    const total = totalOf(app.counts)
     setDialog({
       title: `Delete ${app.name}?`,
       body:
@@ -532,6 +547,7 @@ export default function App() {
               Sign in
             </button>
           )}
+          <GraphStyleToggle graphStyle={graphStyle} onChange={chooseGraphStyle} />
           <ThemeToggle theme={theme} onChange={chooseTheme} />
         </div>
       </header>
@@ -547,6 +563,7 @@ export default function App() {
           <Graph
             key={activeApp.key}
             graph={graph}
+            graphStyle={graphStyle}
             editMode={showEditing}
             selectedId={selectedId}
             onSelect={setSelectedId}

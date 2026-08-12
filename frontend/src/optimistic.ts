@@ -65,6 +65,8 @@ export function draftNode(
     title: fields.title,
     detail: fields.detail ?? null,
     status: fields.status,
+    // The UI never sets this itself -- only an importer does, over the API.
+    external_ref: null,
     // Matches `create_node`: highest sort_order on the app, plus one. Layout
     // order depends on this, so a wrong guess would move the node on reconcile.
     sort_order: Math.max(0, ...graph.nodes.map((n) => n.sort_order)) + 1,

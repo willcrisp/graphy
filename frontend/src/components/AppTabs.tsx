@@ -1,5 +1,9 @@
+/** The tab strip across the top, one tab per app. A `role="tablist"` with
+ *  full roving keyboard navigation (arrows/Home/End, plus the keyboard route
+ *  to a tab's context menu) -- see `onKeyDown` below. */
+
 import { useEffect } from 'react'
-import type { AppSummary } from '../types'
+import { totalOf, type AppSummary } from '../types'
 
 interface Props {
   apps: AppSummary[]
@@ -61,8 +65,7 @@ export default function AppTabs({
     <>
       <div className="tabs" role="tablist" aria-label="Applications" onKeyDown={onKeyDown}>
         {apps.map((app) => {
-          const total =
-            app.counts.done + app.counts.wip + app.counts.todo + app.counts.blocked
+          const total = totalOf(app.counts)
           const active = app.key === activeKey
           return (
             <button

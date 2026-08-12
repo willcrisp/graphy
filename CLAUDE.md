@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+For the full REST endpoint/schema reference, see [`docs/API.md`](docs/API.md) rather
+than duplicating it here. Non-Claude tooling that looks for `AGENTS.md` finds a
+pointer back to this file at [`AGENTS.md`](AGENTS.md).
+
 ## Commands
 
 All backend commands run from `backend/`, all frontend commands from `frontend/`.
@@ -62,6 +66,25 @@ that pass `str(exc)` through **verbatim**. Those messages are user-facing prose
 rendered directly in the detail panel — the cycle message names both tasks by
 title. Write new ones as sentences a person reads, not as error codes.
 
+### Agent import: `external_ref` and `/api/agent-instructions`
+
+`Node.external_ref` exists for one purpose: letting an external importer (an
+agent syncing Jira tickets, say) recognise a node it already created, instead
+of duplicating it or matching fuzzily on title. It is opaque to this app —
+never parsed, never rendered as a link — and unique per app (not globally;
+`uq_node_app_external_ref` in `models.py`), enforced in `services/graph.py`
+*and* at the DB layer so an IntegrityError can never surface as a raw 500. The
+frontend only ever displays it (in the panel header); nothing in the UI writes
+it, and `optimistic.draftNode` always sets it to `null`.
+
+`GET /api/agent-instructions` (in `public.py`, no auth) serves a generated
+Markdown guide for that importer — endpoints, auth, the edge/cycle rules, and
+the reuse-by-`external_ref` workflow. It's generated rather than hand-written
+prose because the status vocabulary it lists is pulled from `models.STATUSES`
+— see `instructions.py`. Don't hardcode `done`/`wip`/`todo`/`blocked` there;
+that would make it a fourth place that list has to stay in sync (see
+"Conventions that will bite you" below).
+
 ### `app.main:app` is lazily constructed
 
 `main.py` defines a module-level `__getattr__` (PEP 562) so `app` is only built when
@@ -106,6 +129,50 @@ Only colour changes between themes. Every rule weight, size and space is shared,
 because status is carried by the drawing convention (hairline vs heavy, dashed for
 `wip`), not by fill.
 
+### Graph style is a second, independent attribute
+
+`data-graph-style` (`blueprint` or `neptune`, set by `graphStyle.ts`) is unrelated to
+`data-theme` — either graph style combines with either theme. Unlike the theme, it
+only reskins `.canvas`: the topbar, panel and dialogs never look at it. `useGraphStyle`
+shares its localStorage-backed wiring with `useTheme` through
+`persistedChoice.ts`'s `usePersistedChoice` — each still keeps its own pure resolver
+(`resolveGraphStyle`/`resolveTheme`, independently tested) and its own `apply`
+function, because the fallback rule genuinely differs: theme falls back to the OS
+preference, graph style has no such thing. There's no pre-paint script in
+`index.html` for graph style — `.canvas` doesn't exist until the board has finished
+loading, so there's nothing to flash.
+
+Neptune is a vertical, more expansive layout with borderless glyph-and-label nodes
+instead of bordered cards, flowing bezier edges with arrowheads instead of blueprint's
+right-angle steps, and a fixed near-black canvas ground that does **not** vary with
+the light/dark theme — that ground is the one trait that defines the look. `layout.ts`'s
+`layoutGraph` takes the style as a
+third argument and branches dagre's `rankdir`/spacing and the per-node dimensions
+(`neptuneNodeWidth` hugs the label; blueprint's `nodeHeight` wraps a fixed card
+width). Rank is read off whichever axis dagre actually ranks on for that direction —
+x for `LR`, y for `TB` — which is also why `TaskNode`'s `Handle`s move from
+left/right to top/bottom under Neptune: React Flow anchors edge paths to them, so
+that one placement decision can't be done in CSS.
+
+Everything else — hiding the card border and detail paragraph, collapsing the status
+word down to just its glyph, recolouring by status — is a plain CSS override under
+`[data-graph-style='neptune']`, deliberately kept out of `TaskNode.tsx` the same way
+`data-theme` never touches component logic. The one trap: `color` is a regular
+property, not a custom one, so an element under `.canvas` that never redeclares it
+(the title block's date/sheet values, its task count) inherits the *computed* colour
+from `body` — the outer theme's ink, not this scope's override — unless something
+between them redeclares `color: var(--ink)`. That redeclaration lives right next to
+Neptune's token overrides in `tokens.css`; if new canvas-scoped tokens stop showing
+up, this is the first thing to check.
+
+Every Neptune edge is solid by default; the one exception is deliberate signal, not
+decoration. `Graph.tsx` sets React Flow's `animated` on an edge exactly when its
+*target* is `wip` — done-into-wip or todo-into-wip both qualify, the source status is
+irrelevant — and app.css recolours and redashes only `.react-flow__edge.animated`
+paths (`--st-wip`, a tighter dash) while leaving the crawling motion itself to React
+Flow's own `.animated` keyframe in its stylesheet, so the two can't drift apart. An
+edge whose target is done, todo or blocked always renders solid regardless of style.
+
 ### Every mutation is applied twice: locally, then from the response
 
 `runMutation` in `App.tsx` patches the graph optimistically so the board redraws on
@@ -136,6 +203,36 @@ one restoring its snapshot would undo a newer pending patch.
 
 App-level mutations (create/rename/delete app) deliberately bypass all of this: they
 create and destroy whole boards, so there is no single board to patch or roll back.
+
+### Shared primitives — reuse these instead of copying a shape
+
+A few pieces of behaviour recur across otherwise-unrelated features. Each was
+factored out once; adding a fourth caller that reimplements one is the bug to
+avoid.
+
+- **`components/Modal.tsx`** — the scrim-plus-Escape-plus-click-outside
+  dismissal shared by `SignIn` and `AppDialog`. A new modal wraps its content
+  in this rather than reimplementing the backdrop handlers.
+- **`components/ToggleGroup.tsx`** — the `role="group"` row of
+  `aria-pressed` buttons behind `ModeToggle` (view/edit) and
+  `GraphStyleToggle` (blueprint/neptune). Both are two-way today; the
+  component itself is not limited to two options.
+- **`persistedChoice.ts`**'s `usePersistedChoice` — the localStorage-seed,
+  apply-on-change, persist-on-choose wiring behind `useTheme` and
+  `useGraphStyle` (see "Graph style is a second, independent attribute"
+  above). It returns the raw setter alongside the persisting one because
+  `useTheme` needs to track the OS preference *without* writing it to
+  storage — following the system is not an explicit choice.
+- **`totalOf(counts)`** in `types.ts` — sums a `StatusCounts`. Used by the
+  tab strip, the delete-app confirmation, and the title block; summing the
+  four fields by hand anywhere is a sign a fifth status will silently be
+  missed there someday.
+- **`routers/admin.py`**'s `_app_mutation` / `_node_mutation` /
+  `_edge_mutation` — every mutating handler writes one row via
+  `services/graph.py`, then wraps it with a freshly-read `BoardOut` (see
+  "Every mutation is applied twice" below for why the whole board comes
+  back). These three functions are that second half, factored out so a new
+  handler is just "call the service, then wrap the result."
 
 ### SQLite foreign keys
 

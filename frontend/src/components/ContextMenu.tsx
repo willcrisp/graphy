@@ -1,3 +1,9 @@
+/** One context menu component for nodes, edges, tabs, and the empty canvas
+ *  (see `nodeMenu`/`edgeMenu`/`tabMenu`/`paneMenu` in `App.tsx`): callers
+ *  build a `MenuSpec` describing what to show, this owns positioning
+ *  (flipped back into the viewport once its real size is known) and
+ *  keyboard navigation. */
+
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export interface MenuItem {

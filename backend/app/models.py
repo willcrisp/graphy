@@ -49,6 +49,9 @@ class Node(Base):
         CheckConstraint(
             "status IN ('done', 'wip', 'todo', 'blocked')", name="ck_node_status"
         ),
+        # NULLs are exempt from SQLite uniqueness, so this only bites nodes
+        # that actually carry an external_ref -- most hand-created ones don't.
+        UniqueConstraint("app_id", "external_ref", name="uq_node_app_external_ref"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -58,6 +61,11 @@ class Node(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # An opaque handle to whatever created this node from an external system,
+    # e.g. a Jira key like "PROJ-123". Unique per app so a re-run of an import
+    # can look a node up by it instead of guessing from the title. Never
+    # interpreted by this app -- no format is assumed or validated.
+    external_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow

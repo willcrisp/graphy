@@ -483,6 +483,137 @@
   background: var(--accent-draw);
 }
 
+/* --- neptune graph style ------------------------------------------------
+   Everything here is scoped under [data-graph-style='neptune'] .canvas, so
+   none of it leaks into the blueprint style or outside the canvas. Layout
+   direction, spacing and per-node dimensions come from layout.ts -- this is
+   purely how those reserved boxes get drawn. */
+
+@keyframes task-settle-vertical {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+[data-graph-style='neptune'] .canvas .task {
+  width: 100%;
+  min-height: 0;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  animation-name: task-settle-vertical;
+}
+
+/* The accent rail identifies the app in the blueprint style; neptune has no
+   equivalent mark, so it is dropped rather than reskinned. */
+[data-graph-style='neptune'] .canvas .task__rail {
+  display: none;
+}
+
+[data-graph-style='neptune'] .canvas .task__body {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  min-width: 0;
+}
+
+/* Collapses the "Done"/"In progress"/etc. word that follows the glyph in the
+   blueprint style, without touching the markup: the glyph is restored to
+   size immediately below. Status still reads without colour -- the glyph
+   alone carries it, same as the blueprint style's border weight/dash. */
+[data-graph-style='neptune'] .canvas .task__status {
+  order: -1;
+  margin: 0;
+  font-size: 0;
+  color: inherit;
+}
+
+[data-graph-style='neptune'] .canvas .task__glyph {
+  font-size: 13px;
+}
+
+[data-graph-style='neptune'] .canvas .task__title {
+  font-family: var(--font-mono);
+  font-size: var(--t-annotation);
+  font-weight: 600;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+}
+
+/* Neptune shows no description inline -- the side panel is where that lives. */
+[data-graph-style='neptune'] .canvas .task__detail {
+  display: none;
+}
+
+[data-graph-style='neptune'] .canvas .task--done .task__status,
+[data-graph-style='neptune'] .canvas .task--done .task__title {
+  color: var(--st-done);
+}
+[data-graph-style='neptune'] .canvas .task--wip .task__status,
+[data-graph-style='neptune'] .canvas .task--wip .task__title {
+  color: var(--st-wip);
+}
+[data-graph-style='neptune'] .canvas .task--todo .task__status,
+[data-graph-style='neptune'] .canvas .task--todo .task__title {
+  color: var(--st-todo);
+}
+[data-graph-style='neptune'] .canvas .task--blocked .task__status,
+[data-graph-style='neptune'] .canvas .task--blocked .task__title {
+  color: var(--st-blocked);
+}
+
+[data-graph-style='neptune'] .canvas .react-flow__node:hover .task {
+  filter: brightness(1.3);
+}
+
+[data-graph-style='neptune'] .canvas .react-flow__node.selected .task {
+  outline: 1px dashed var(--ink);
+  outline-offset: 6px;
+  filter: none;
+}
+
+[data-graph-style='neptune'] .canvas .task__handle {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Solid by default -- the dashed, moving treatment below is reserved for
+   edges flowing into a wip task, so it reads as a signal rather than a
+   blanket texture. */
+[data-graph-style='neptune'] .canvas .react-flow__edge-path {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+[data-graph-style='neptune'] .canvas .react-flow__edge.selected .react-flow__edge-path,
+[data-graph-style='neptune'] .canvas .react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+/* Marching ants: only on edges whose target is in progress (Graph.tsx sets
+   `animated` on exactly those). The dash and colour are ours; the crawling
+   motion is React Flow's own `.animated` keyframe (style.css), left alone so
+   the two definitions can't drift out of step. */
+[data-graph-style='neptune'] .canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--st-wip);
+  stroke-width: 1.25;
+  stroke-dasharray: 2 4;
+}
+
 /* --- empty state ------------------------------------------------------- */
 
 .empty {

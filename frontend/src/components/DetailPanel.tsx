@@ -1,3 +1,9 @@
+/** The side panel for the selected task: a read-only summary in View mode,
+ *  editable fields (saving on blur) in Edit mode, plus its incoming/outgoing
+ *  connections. Local field state is a draft that only reaches the server
+ *  through `onSave` -- see the effect below that re-seeds it whenever the
+ *  selected task changes. */
+
 import { useEffect, useRef, useState } from 'react'
 import {
   STATUSES,
@@ -69,7 +75,11 @@ export default function DetailPanel({
       }}
     >
       <header className="panel__head">
-        <span className="panel__id mono">Task {String(task.id).padStart(3, '0')}</span>
+        <span className="panel__id mono">
+          Task {String(task.id).padStart(3, '0')}
+          {/* Set only by an importer (e.g. a Jira sync), never by this panel. */}
+          {task.external_ref ? ` · ${task.external_ref}` : ''}
+        </span>
         <button type="button" className="panel__close" onClick={onClose}>
           <span aria-hidden="true">×</span>
           <span className="visually-hidden">Close panel</span>

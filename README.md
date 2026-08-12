@@ -112,9 +112,20 @@ become editable and save on blur. New nodes appear unconnected — drag from a n
 right handle to another node's left handle to connect them. Deleting is behind a
 confirm step, never a keyboard shortcut.
 
+**Two independent ways to draw the same graph.** The style toggle switches between
+Blueprint (bordered cards, right-angle edges, horizontal layout) and Neptune (a
+vertical layout of borderless glyph-and-label nodes with flowing curved edges). It's
+orthogonal to the light/dark theme — either style combines with either theme — and
+only changes the canvas; the topbar and panel look the same in both.
+
 **The graph can't tie itself in knots.** Edges that would cross between apps, point a
 node at itself, duplicate an existing link, or close a loop are all rejected, and the
 panel explains why in plain language rather than showing a status code.
+
+**An agent can populate the board for you.** Point it at `GET /api/agent-instructions`
+for a machine-readable guide to the API, auth, and the invariants above. Tasks carry
+an optional `external_ref` (e.g. a Jira key) so a re-run of an import updates the
+tasks it already created instead of duplicating them.
 
 ## Configuration
 
@@ -208,47 +219,66 @@ GET  /api/health                -> {"status": "ok"}
 GET  /api/apps                  -> apps with per-status counts
 GET  /api/apps/{key}/graph      -> {app, nodes, edges, last_updated}
 GET  /api/config                -> {readonly, authenticated}
+GET  /api/agent-instructions    -> markdown guide for an importing agent
 ```
 
-Admin, session cookie required:
+Admin, session cookie required (see "Publishing read-only" above for the two
+guards every one of these goes through):
 
 ```
 POST   /api/auth/login          {password} -> 204 + Set-Cookie
 POST   /api/auth/logout         -> 204
-POST   /api/apps/{key}/nodes    {title, detail?, status} -> node
-PATCH  /api/nodes/{id}          {title?, detail?, status?} -> node
-DELETE /api/nodes/{id}          -> 204
-POST   /api/apps/{key}/edges    {source_id, target_id} -> edge
-DELETE /api/edges/{id}          -> 204
+POST   /api/apps                {name, accent?} -> {app, apps}
+PATCH  /api/apps/{key}          {name} -> {app, apps}
+DELETE /api/apps/{key}          -> {apps}                (refused on the last app)
+POST   /api/apps/{key}/nodes    {title, detail?, status, external_ref?} -> {node, graph, apps}
+PATCH  /api/nodes/{id}          {title?, detail?, status?, external_ref?} -> {node, graph, apps}
+DELETE /api/nodes/{id}          -> {graph, apps}
+POST   /api/apps/{key}/edges    {source_id, target_id} -> {edge, graph, apps}
+DELETE /api/edges/{id}          -> {graph, apps}
 ```
+
+None of the mutating endpoints are 204: each returns the whole board it just
+changed (see "Every mutation is applied twice" above), so the client never has
+to make a second request to redraw. Full request/response schemas, error
+shapes, and the invariants each write is checked against live in
+[`docs/API.md`](docs/API.md).
 
 ## Repository layout
 
 ```
 backend/
   app/
-    main.py       FastAPI app, static mount, exception handlers
-    config.py     env parsing, fail-fast validation
-    db.py         engine, session factory, FK pragma
-    models.py     four tables: app, node, edge, meta
-    schemas.py    pydantic; status enum enforced here
-    auth.py       session cookie, password check, guards
-    services/     graph invariants -- cycle check lives here
-    routers/      public / auth / admin
-  scripts/        seed.py
+    main.py             FastAPI app, static mount, exception handlers
+    config.py           env parsing, fail-fast validation
+    db.py               engine, session factory, FK pragma
+    models.py           four tables: app, node, edge, meta
+    schemas.py          pydantic; status enum enforced here
+    auth.py             session cookie, password check, guards
+    instructions.py     generates the agent-instructions markdown
+    services/           graph invariants -- cycle check lives here
+    routers/            public / auth / admin
+  scripts/              seed.py
   tests/
 frontend/
   src/
-    layout.ts     dagre wrapper; node dimensions computed, not measured
-    theme.ts      light/dark resolution and persistence
-    api.ts        typed client, flattens server errors to one sentence
-    components/   Graph, TaskNode, AppTabs, DetailPanel, TitleBlock, ...
-    styles/       tokens.css (design tokens), app.css
-  public/fonts/   self-hosted IBM Plex subset
+    layout.ts           dagre wrapper; node dimensions computed, not measured
+    theme.ts             light/dark resolution and persistence
+    graphStyle.ts        blueprint/neptune resolution and persistence
+    persistedChoice.ts   the localStorage hook wiring theme.ts and graphStyle.ts share
+    optimistic.ts        local mutation of the graph, mirrors services/graph.py
+    api.ts               typed client, flattens server errors to one sentence
+    components/          Graph, TaskNode, AppTabs, DetailPanel, TitleBlock, Modal,
+                          ToggleGroup, ...
+    styles/               tokens.css (design tokens), app.css
+  public/fonts/           self-hosted IBM Plex subset
+docs/
+  API.md                  full REST reference: every endpoint, schema, and error shape
 ```
 
 Working on this with Claude Code? See [CLAUDE.md](CLAUDE.md) for the architectural
-decisions and the conventions that will bite you.
+decisions and the conventions that will bite you. Working on this with another
+agent or tool? [AGENTS.md](AGENTS.md) points at the same document.
 
 ## Implementation notes
 
@@ -260,8 +290,13 @@ decisions and the conventions that will bite you.
   layout. This is intended, and tested.
 - **Node dimensions are known before layout**, not measured from the DOM, which would
   make layout asynchronous and janky.
-- **Every mutation refetches the graph.** At tens of nodes per app this is
-  imperceptible and much simpler than optimistic patching.
+- **Every mutation is applied twice: locally, then from the response.** The client
+  patches the graph optimistically so the board redraws on the click, fires the
+  request, and replaces the graph outright with whatever comes back — which is why
+  every mutating endpoint returns the whole board rather than just the row it wrote,
+  and none of the deletes are 204. A rejection (a cycle, a duplicate edge) rolls the
+  optimistic patch back and shows the server's sentence. See
+  [`CLAUDE.md`](CLAUDE.md) for the rollback ordering rules.
 - **The board follows your OS light/dark setting**, and the toggle in the top right
   overrides it for good (kept in `localStorage`). The theme is resolved before first
   paint, so there is no flash of the light board on a dark desktop. Dark is a full

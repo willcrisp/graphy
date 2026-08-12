@@ -3,6 +3,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MarkerType,
   ReactFlow,
   useReactFlow,
   type Connection,
@@ -12,14 +13,33 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import TaskNode from './TaskNode'
-import { NODE_WIDTH, layoutGraph } from '../layout'
+import { layoutGraph } from '../layout'
+import type { GraphStyle } from '../graphStyle'
 import type { Graph as GraphData } from '../types'
+
+/** The React Flow canvas: turns `graph` (server shape) plus a computed
+ *  `layoutGraph` position into React Flow nodes/edges, and forwards its
+ *  pointer events (click, connect, context menu) up to `App.tsx` as plain
+ *  ids -- it holds no mutation logic of its own. */
 
 const nodeTypes = { task: TaskNode }
 const fitViewOptions = { padding: 0.2 }
 
+/** Marker arrowheads live in an SVG <defs> outside the cascade React Flow's
+ *  className props reach, so these are literals rather than var() references.
+ *  They match the neptune canvas's --rule-strong and --st-wip (tokens.css). */
+const NEPTUNE_MARKER_COLOR = '#2c3f36'
+const NEPTUNE_WIP_MARKER_COLOR = '#a78bfa'
+
+/** Curvature for neptune's bezier edges. Cheap default is 0.25; this is
+ *  slightly higher so siblings that fan out sideways read as a deliberate
+ *  swoop rather than a stiff diagonal, while nodes stacked directly below
+ *  their parent still draw as a near-straight line. */
+const NEPTUNE_CURVATURE = 0.32
+
 interface Props {
   graph: GraphData
+  graphStyle: GraphStyle
   editMode: boolean
   selectedId: number | null
   onSelect: (id: number | null) => void
@@ -34,6 +54,7 @@ interface Props {
 
 export default function Graph({
   graph,
+  graphStyle,
   editMode,
   selectedId,
   onSelect,
@@ -44,9 +65,11 @@ export default function Graph({
   onPaneMenu,
 }: Props) {
   const { fitView } = useReactFlow()
+  const neptune = graphStyle === 'neptune'
 
   const { nodes, edges } = useMemo(() => {
-    const positions = layoutGraph(graph.nodes, graph.edges)
+    const positions = layoutGraph(graph.nodes, graph.edges, graphStyle)
+    const byId = new Map(graph.nodes.map((task) => [task.id, task]))
     const flowNodes: Node[] = graph.nodes.flatMap((task) => {
       const position = positions.get(task.id)
       if (!position) return []
@@ -55,25 +78,43 @@ export default function Graph({
           id: String(task.id),
           type: 'task',
           position: { x: position.x, y: position.y },
-          width: NODE_WIDTH,
+          width: position.width,
           height: position.height,
           selected: task.id === selectedId,
-          data: { task, editable: editMode, rank: position.rank },
+          data: { task, editable: editMode, rank: position.rank, style: graphStyle },
           ariaLabel: `${task.title}, ${task.status}`,
         },
       ]
     })
 
-    const flowEdges: Edge[] = graph.edges.map((edge) => ({
-      id: String(edge.id),
-      source: String(edge.source_id),
-      target: String(edge.target_id),
-      type: 'smoothstep',
-      focusable: true,
-    }))
+    // Neptune draws every connection as a flowing curve rather than blueprint's
+    // right-angle steps. An edge whose target is in progress gets React Flow's
+    // marching-ants animation, coloured to match the wip status -- movement
+    // reads as "work flowing into this task" -- everything else is a plain
+    // solid line, so the animation reads as a signal rather than decoration.
+    const flowEdges: Edge[] = graph.edges.map((edge) => {
+      const wip = neptune && byId.get(edge.target_id)?.status === 'wip'
+      return {
+        id: String(edge.id),
+        source: String(edge.source_id),
+        target: String(edge.target_id),
+        type: neptune ? 'default' : 'smoothstep',
+        pathOptions: neptune ? { curvature: NEPTUNE_CURVATURE } : undefined,
+        focusable: true,
+        animated: wip,
+        markerEnd: neptune
+          ? {
+              type: MarkerType.ArrowClosed,
+              width: 12,
+              height: 12,
+              color: wip ? NEPTUNE_WIP_MARKER_COLOR : NEPTUNE_MARKER_COLOR,
+            }
+          : undefined,
+      } as Edge
+    })
 
     return { nodes: flowNodes, edges: flowEdges }
-  }, [graph, editMode, selectedId])
+  }, [graph, editMode, selectedId, graphStyle, neptune])
 
   // Re-frame whenever the app changes. The key is the app, not the node count,
   // so adding a node does not yank the viewport out from under the user.
@@ -138,7 +179,12 @@ export default function Graph({
         }
       }}
     >
-      <Background variant={BackgroundVariant.Lines} gap={16} size={1} color="var(--grid)" />
+      <Background
+        variant={neptune ? BackgroundVariant.Dots : BackgroundVariant.Lines}
+        gap={neptune ? 28 : 16}
+        size={1}
+        color="var(--grid)"
+      />
       {/* Zoom in/out/fit only -- no minimap, no interactivity lock. */}
       <Controls showZoom showFitView showInteractive={false} position="bottom-left" />
     </ReactFlow>

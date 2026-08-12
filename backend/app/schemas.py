@@ -51,6 +51,7 @@ class NodeOut(BaseModel):
     title: str
     detail: str | None
     status: Status
+    external_ref: str | None
     sort_order: int
     created_at: datetime
     updated_at: datetime
@@ -127,9 +128,11 @@ class NodeCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     detail: str | None = Field(default=None, max_length=2000)
     status: Status
+    external_ref: str | None = Field(default=None, max_length=200)
 
     _v_title = field_validator("title")(_title)
     _v_detail = field_validator("detail")(_detail)
+    _v_external_ref = field_validator("external_ref")(_detail)
 
 
 class NodeUpdate(BaseModel):
@@ -139,9 +142,11 @@ class NodeUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     detail: str | None = Field(default=None, max_length=2000)
     status: Status | None = None
+    external_ref: str | None = Field(default=None, max_length=200)
 
     _v_title = field_validator("title")(lambda v: _title(v) if v is not None else None)
     _v_detail = field_validator("detail")(_detail)
+    _v_external_ref = field_validator("external_ref")(_detail)
 
 
 class AppCreate(BaseModel):

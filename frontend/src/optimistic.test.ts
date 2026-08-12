@@ -22,6 +22,7 @@ const node = (
   title: `Node ${id}`,
   detail: null,
   status: 'todo',
+  external_ref: null,
   sort_order: id,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',

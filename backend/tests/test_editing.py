@@ -155,6 +155,30 @@ async def test_duplicate_edge_message(admin, session):
     assert response.json()["detail"] == "Those two tasks are already connected."
 
 
+async def test_external_ref_round_trips_through_create(admin, session):
+    await make_app(session, "alpha")
+    response = await admin.post(
+        "/api/apps/alpha/nodes",
+        json={"title": "Ingest", "status": "todo", "external_ref": "JIRA-42"},
+    )
+    assert response.status_code == 201
+    assert response.json()["node"]["external_ref"] == "JIRA-42"
+
+
+async def test_duplicate_external_ref_message(admin, session):
+    await make_app(session, "alpha")
+    await admin.post(
+        "/api/apps/alpha/nodes",
+        json={"title": "Ingest", "status": "todo", "external_ref": "JIRA-42"},
+    )
+    response = await admin.post(
+        "/api/apps/alpha/nodes",
+        json={"title": "Ingest again", "status": "todo", "external_ref": "JIRA-42"},
+    )
+    assert response.status_code == 422
+    assert "JIRA-42" in response.json()["detail"]
+
+
 async def test_node_in_unknown_app_is_404(admin):
     response = await admin.post(
         "/api/apps/ghost/nodes", json={"title": "X", "status": "todo"}

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import Modal from './Modal'
 
+/** The one-field password form. `onSubmit` rejecting (wrong password, or a
+ *  board that turned read-only mid-session) surfaces its message inline
+ *  rather than closing the dialog. */
 interface Props {
   onSubmit: (password: string) => Promise<void>
   onClose: () => void
@@ -29,11 +33,7 @@ export default function SignIn({ onSubmit, onClose }: Props) {
   }
 
   return (
-    <div
-      className="scrim"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-      onKeyDown={(event) => event.key === 'Escape' && onClose()}
-    >
+    <Modal onClose={onClose}>
       <form
         className="signin"
         onSubmit={submit}
@@ -69,6 +69,6 @@ export default function SignIn({ onSubmit, onClose }: Props) {
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

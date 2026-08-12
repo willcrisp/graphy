@@ -102,6 +102,51 @@ async def test_edge_to_missing_node_is_not_found(session):
         await service.create_edge(session, app, source_id=a.id, target_id=9999)
 
 
+# --- Invariant: external_ref is unique per app, for idempotent imports -----
+
+
+async def test_duplicate_external_ref_in_same_app_is_rejected(session):
+    app = await make_app(session)
+    await service.create_node(
+        session, app, title="A", detail=None, status="todo", external_ref="JIRA-1"
+    )
+    with pytest.raises(GraphError, match="JIRA-1"):
+        await service.create_node(
+            session, app, title="B", detail=None, status="todo", external_ref="JIRA-1"
+        )
+
+
+async def test_same_external_ref_allowed_in_different_apps(session):
+    alpha = await make_app(session, "alpha")
+    beta = await make_app(session, "beta")
+    await service.create_node(
+        session, alpha, title="A", detail=None, status="todo", external_ref="JIRA-1"
+    )
+    # Does not raise.
+    await service.create_node(
+        session, beta, title="B", detail=None, status="todo", external_ref="JIRA-1"
+    )
+
+
+async def test_patching_external_ref_onto_a_duplicate_is_rejected(session):
+    app = await make_app(session)
+    await service.create_node(
+        session, app, title="A", detail=None, status="todo", external_ref="JIRA-1"
+    )
+    other = await make_node(session, app, "B")
+    with pytest.raises(GraphError, match="JIRA-1"):
+        await service.update_node(session, other.id, {"external_ref": "JIRA-1"})
+
+
+async def test_node_keeps_its_own_external_ref_on_unrelated_patch(session):
+    app = await make_app(session)
+    node = await service.create_node(
+        session, app, title="A", detail=None, status="todo", external_ref="JIRA-1"
+    )
+    updated = await service.update_node(session, node.id, {"status": "wip"})
+    assert updated.external_ref == "JIRA-1"
+
+
 # --- Invariant 4: status validated at the API boundary ---------------------
 
 

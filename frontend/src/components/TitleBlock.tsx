@@ -1,4 +1,4 @@
-import { STATUSES, STATUS_LABEL, type AppInfo, type StatusCounts } from '../types'
+import { STATUSES, STATUS_LABEL, totalOf, type AppInfo, type StatusCounts } from '../types'
 
 interface Props {
   app: AppInfo
@@ -21,7 +21,7 @@ function formatDate(iso: string | null): string {
  * earns that by carrying the app identity, the tally, and the revision date.
  */
 export default function TitleBlock({ app, counts, lastUpdated }: Props) {
-  const total = STATUSES.reduce((sum, status) => sum + counts[status], 0)
+  const total = totalOf(counts)
 
   return (
     <figure

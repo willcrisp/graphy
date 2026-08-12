@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { usePersistedChoice } from './persistedChoice'
 
 export type Theme = 'light' | 'dark'
 
@@ -27,15 +28,15 @@ export function applyTheme(theme: Theme) {
  * recomputes the same answer rather than introducing a second source of truth.
  */
 export function useTheme(): [Theme, (theme: Theme) => void] {
-  const [theme, setTheme] = useState<Theme>(() =>
-    resolveTheme(window.localStorage.getItem(THEME_KEY), window.matchMedia(DARK_QUERY).matches),
+  const [theme, choose, setTheme] = usePersistedChoice<Theme>(
+    THEME_KEY,
+    () => resolveTheme(window.localStorage.getItem(THEME_KEY), window.matchMedia(DARK_QUERY).matches),
+    applyTheme,
   )
 
-  useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
-
   // Track the OS for as long as the visitor has not chosen for themselves.
+  // Goes through the raw setter, not `choose` -- following the system is not
+  // an explicit choice and must not be written to storage.
   useEffect(() => {
     const query = window.matchMedia(DARK_QUERY)
     function onChange(event: MediaQueryListEvent) {
@@ -44,12 +45,7 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
     }
     query.addEventListener('change', onChange)
     return () => query.removeEventListener('change', onChange)
-  }, [])
-
-  const choose = useCallback((next: Theme) => {
-    window.localStorage.setItem(THEME_KEY, next)
-    setTheme(next)
-  }, [])
+  }, [setTheme])
 
   return [theme, choose]
 }

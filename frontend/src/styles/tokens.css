@@ -179,6 +179,41 @@
   --tab-accent-draw: color-mix(in srgb, var(--tab-accent), #fff 45%);
 }
 
+/* --- neptune graph style --------------------------------------------------
+   A second, independent attribute (data-graph-style, set by graphStyle.ts)
+   that reskins the canvas only -- topbar, panel and dialogs stay on whatever
+   light/dark theme is active. A fixed near-black ground is the one trait
+   that defines this look, so unlike the dark theme above it does not vary
+   with the light/dark toggle: these values apply regardless of --ground's
+   scope-level definition. Structural differences (vertical layout, wider
+   spacing, borderless nodes) live in layout.ts and app.css; this block is
+   colour only. */
+[data-graph-style='neptune'] .canvas {
+  --ground: #0a0f0d;
+  --surface: #121b17;
+  --grid: #17211d;
+  --ink: #dce6ec;
+  --ink-mute: #8a9aa1;
+  --rule: #1c2823;
+  --rule-strong: #2c3f36;
+
+  --st-done: #3fa38b;
+  --st-wip: #a78bfa;
+  --st-wip-ink: #a78bfa;
+  --st-todo: #7f92a1;
+  --st-todo-ink: #7f92a1;
+  --st-blocked: #e0645f;
+
+  /* `color` is a regular (non-custom) property: an element that never
+     redeclares it inherits the *computed* value from its nearest ancestor
+     that does, not a value re-resolved against this scope's --ink. Without
+     this, anything under .canvas that relies on inherited colour (the title
+     block's date/sheet values, its task count) would keep showing the outer
+     theme's ink -- dark-on-dark here. Redeclaring it right where --ink is
+     redefined is what makes the override actually reach descendants. */
+  color: var(--ink);
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion: 0ms;

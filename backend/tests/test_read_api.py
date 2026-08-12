@@ -77,3 +77,16 @@ async def test_config_defaults(client):
         "readonly": False,
         "authenticated": False,
     }
+
+
+async def test_agent_instructions_is_public_markdown(client):
+    response = await client.get("/api/agent-instructions")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    body = response.text
+    # Names every endpoint an importer needs, and stays in sync with the
+    # actual status vocabulary rather than a second hardcoded copy of it.
+    assert "/api/auth/login" in body
+    assert "/api/apps/{key}/nodes" in body
+    assert "external_ref" in body
+    assert "`done`" in body and "`blocked`" in body

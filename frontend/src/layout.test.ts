@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NODE_WIDTH, layoutGraph, nodeHeight } from './layout'
+import { NODE_WIDTH, layoutGraph, neptuneNodeWidth, nodeHeight } from './layout'
 import type { TaskNodeData, GraphEdge, Status } from './types'
 
 let nextId = 1
@@ -12,6 +12,7 @@ function node(title: string, detail: string | null = null): TaskNodeData {
     title,
     detail,
     status: 'todo' as Status,
+    external_ref: null,
     sort_order: id,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -100,5 +101,48 @@ describe('layoutGraph ordering', () => {
 
   it('returns an empty map for an empty app', () => {
     expect(layoutGraph([], []).size).toBe(0)
+  })
+})
+
+describe('layoutGraph neptune style', () => {
+  it('defaults to the blueprint style when none is given', () => {
+    const [a, b] = [node('A'), node('B')]
+    const withoutStyle = layoutGraph([a, b], [edge(a, b)])
+    const withBlueprint = layoutGraph([a, b], [edge(a, b)], 'blueprint')
+    expect(withoutStyle).toEqual(withBlueprint)
+  })
+
+  it('stacks a dependency below its dependant instead of to its right', () => {
+    const a = node('A')
+    const b = node('B')
+    const positions = layoutGraph([a, b], [edge(a, b)], 'neptune')
+    expect(positions.get(a.id)!.y).toBeLessThan(positions.get(b.id)!.y)
+  })
+
+  it('ranks along y rather than x', () => {
+    const [a, b, c] = [node('A'), node('B'), node('C')]
+    const positions = layoutGraph([a, b, c], [edge(a, b), edge(b, c)], 'neptune')
+    expect(positions.get(a.id)!.rank).toBe(0)
+    expect(positions.get(b.id)!.rank).toBe(1)
+    expect(positions.get(c.id)!.rank).toBe(2)
+  })
+
+  it('sizes nodes to the label instead of a fixed card width', () => {
+    const positions = layoutGraph(
+      [node('AB'), node('A rather longer title than that one')],
+      [],
+      'neptune',
+    )
+    const [short, long] = [...positions.values()].sort((a, b) => a.width - b.width)
+    expect(short.width).toBeLessThan(long.width)
+    expect(short.width).not.toBe(NODE_WIDTH)
+  })
+})
+
+describe('neptuneNodeWidth', () => {
+  it('grows with the label and stays within its clamp', () => {
+    expect(neptuneNodeWidth('AB')).toBeLessThan(neptuneNodeWidth('A much longer task title'))
+    expect(neptuneNodeWidth('')).toBeGreaterThanOrEqual(84)
+    expect(neptuneNodeWidth('X'.repeat(200))).toBeLessThanOrEqual(220)
   })
 })

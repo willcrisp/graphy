@@ -1,3 +1,7 @@
+/** Typed fetch client. One function per endpoint, all routed through
+ *  `request`, which prefixes `/api`, attaches cookies, and turns a non-2xx
+ *  response into a thrown `ApiError` carrying the server's own message. */
+
 import type {
   AppConfig,
   AppMutation,
