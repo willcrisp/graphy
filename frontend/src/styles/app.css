@@ -414,43 +414,43 @@
    for `todo`, but Chrome floors a 1.5px border to 1px at devicePixelRatio 1 --
    which erases the very distinction the convention rests on. 2px keeps the
    hierarchy legible on ordinary displays as well as retina. */
-.feature--done {
+.task--done {
   border: 2px solid var(--st-done);
 }
-.feature--done .task__status {
+.task--done .task__status {
   color: var(--st-done);
 }
 
-.feature--wip {
+.task--wip {
   border: 2px dashed var(--st-wip);
 }
-.feature--wip .task__status {
+.task--wip .task__status {
   color: var(--st-wip-ink);
 }
 
-.feature--todo {
+.task--todo {
   border: 1px solid var(--st-todo);
 }
-.feature--todo .task__title {
+.task--todo .task__title {
   opacity: 0.8;
 }
 
-.feature--blocked {
+.task--blocked {
   border: 2px solid var(--st-blocked);
 }
-.feature--blocked .feature__rail {
+.task--blocked .task__rail {
   flex-basis: 4px;
   border-right: 3px solid var(--st-blocked);
 }
-.feature--blocked .task__status {
+.task--blocked .task__status {
   color: var(--st-blocked);
 }
 
-.react-flow__node:hover .feature {
+.react-flow__node:hover .task {
   border-color: var(--ink);
 }
 
-.react-flow__node.selected .feature {
+.react-flow__node.selected .task {
   border-color: var(--ink);
   outline: 1px solid var(--ink);
   outline-offset: 1px;

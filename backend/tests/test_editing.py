@@ -128,7 +128,7 @@ async def test_self_edge_message(admin, session):
     response = await admin.post(
         "/api/apps/alpha/edges", json={"source_id": node.id, "target_id": node.id}
     )
-    assert response.json()["detail"] == "A feature cannot depend on itself."
+    assert response.json()["detail"] == "A task cannot depend on itself."
 
 
 async def test_cross_app_edge_message(admin, session):
@@ -152,7 +152,7 @@ async def test_duplicate_edge_message(admin, session):
     response = await admin.post(
         "/api/apps/alpha/edges", json={"source_id": a.id, "target_id": b.id}
     )
-    assert response.json()["detail"] == "Those two features are already connected."
+    assert response.json()["detail"] == "Those two tasks are already connected."
 
 
 async def test_node_in_unknown_app_is_404(admin):

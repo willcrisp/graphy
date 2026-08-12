@@ -1,5 +1,5 @@
 import dagre from '@dagrejs/dagre'
-import type { FeatureNodeData, GraphEdge } from './types'
+import type { TaskNodeData, GraphEdge } from './types'
 
 /** Node dimensions are fixed and known before layout. Measuring the DOM would
  *  make layout asynchronous and visibly janky on app switch, so height is
@@ -20,7 +20,7 @@ export interface Positioned {
   rank: number
 }
 
-export function nodeHeight(node: Pick<FeatureNodeData, 'title' | 'detail'>): number {
+export function nodeHeight(node: Pick<TaskNodeData, 'title' | 'detail'>): number {
   const titleLines = Math.max(1, Math.ceil(node.title.length / TITLE_CHARS_PER_LINE))
   return (
     HEIGHT_BASE +
@@ -37,7 +37,7 @@ export function nodeHeight(node: Pick<FeatureNodeData, 'title' | 'detail'>): num
  * requirement, and dagre's output depends on insertion order.
  */
 export function layoutGraph(
-  nodes: FeatureNodeData[],
+  nodes: TaskNodeData[],
   edges: GraphEdge[],
 ): Map<number, Positioned> {
   const graph = new dagre.graphlib.Graph()

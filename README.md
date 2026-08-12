@@ -1,6 +1,6 @@
 # Blueprint
 
-Feature roadmaps for six independent applications, rendered as interactive node
+Task roadmaps for six independent applications, rendered as interactive node
 graphs. Public visitors get a clean read-only view; a single admin can sign in and
 edit the graph in place.
 
@@ -61,7 +61,7 @@ Open it and fill in two values:
 cd backend && uv run --env-file ../.env python scripts/seed.py
 ```
 
-Creates six apps with realistic feature trees, including a diamond-shaped dependency
+Creates six apps with realistic task trees, including a diamond-shaped dependency
 in Lattice and one deliberately empty app (Tessellate) so you can see the empty
 state. Re-running skips apps that already exist; pass `--reset` to drop everything
 first.
@@ -242,7 +242,7 @@ frontend/
     layout.ts     dagre wrapper; node dimensions computed, not measured
     theme.ts      light/dark resolution and persistence
     api.ts        typed client, flattens server errors to one sentence
-    components/   Graph, FeatureNode, AppTabs, DetailPanel, TitleBlock, ...
+    components/   Graph, TaskNode, AppTabs, DetailPanel, TitleBlock, ...
     styles/       tokens.css (design tokens), app.css
   public/fonts/   self-hosted IBM Plex subset
 ```

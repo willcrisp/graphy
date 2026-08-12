@@ -53,7 +53,7 @@ export function withCounts(apps: AppSummary[], graph: Graph): AppSummary[] {
 
 /** Build the row a create will produce, without inserting it. Split from
  *  `insertNode` so the caller holds the temp id -- it needs it to select the
- *  new feature -- while the function it hands to the patcher stays pure. */
+ *  new task -- while the function it hands to the patcher stays pure. */
 export function draftNode(
   graph: Graph,
   fields: { title: string; detail?: string | null; status: Status },

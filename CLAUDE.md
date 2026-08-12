@@ -59,7 +59,7 @@ script and tests exercise the same rules as HTTP traffic.
 
 `GraphError` → 422 and `NotFoundError` → 404 via exception handlers in `main.py`
 that pass `str(exc)` through **verbatim**. Those messages are user-facing prose
-rendered directly in the detail panel — the cycle message names both features by
+rendered directly in the detail panel — the cycle message names both tasks by
 title. Write new ones as sentences a person reads, not as error codes.
 
 ### `app.main:app` is lazily constructed
@@ -79,7 +79,7 @@ lifespan and hangs off `app.state.db`.
 are never stored.
 
 Node dimensions must be known **before** layout — heights are derived arithmetically
-in `nodeHeight()` and never measured from the DOM. `.feature { height: 100% }` in
+in `nodeHeight()` and never measured from the DOM. `.task { height: 100% }` in
 `app.css` makes the drawn node fill whatever box `layout.ts` reserved, so small drift
 between the arithmetic and the real type metrics can't cause clipping. If you change
 node padding, font size, or line height, re-check the constants at the top of

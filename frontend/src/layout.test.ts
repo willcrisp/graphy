@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { NODE_WIDTH, layoutGraph, nodeHeight } from './layout'
-import type { FeatureNodeData, GraphEdge, Status } from './types'
+import type { TaskNodeData, GraphEdge, Status } from './types'
 
 let nextId = 1
 
-function node(title: string, detail: string | null = null): FeatureNodeData {
+function node(title: string, detail: string | null = null): TaskNodeData {
   const id = nextId++
   return {
     id,
@@ -18,7 +18,7 @@ function node(title: string, detail: string | null = null): FeatureNodeData {
   }
 }
 
-function edge(source: FeatureNodeData, target: FeatureNodeData, id = nextId++): GraphEdge {
+function edge(source: TaskNodeData, target: TaskNodeData, id = nextId++): GraphEdge {
   return { id, app_id: 1, source_id: source.id, target_id: target.id }
 }
 
@@ -31,7 +31,7 @@ describe('nodeHeight', () => {
   })
 
   it('grows with a title that must wrap', () => {
-    expect(nodeHeight(node('A very long feature title that certainly wraps over lines'))).
+    expect(nodeHeight(node('A very long task title that certainly wraps over lines'))).
       toBeGreaterThan(nodeHeight(node('Short')))
   })
 })

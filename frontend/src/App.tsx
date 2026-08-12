@@ -373,8 +373,8 @@ export default function App() {
   // --- context menus ------------------------------------------------------
 
   function nodeMenu(id: number, x: number, y: number) {
-    const feature = graph?.nodes.find((node) => node.id === id)
-    if (!feature) return
+    const task = graph?.nodes.find((node) => node.id === id)
+    if (!task) return
     const groups: MenuItem[][] = [
       [{ label: 'Open details', mark: '›', onSelect: () => setSelectedId(id) }],
     ]
@@ -498,7 +498,7 @@ export default function App() {
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__wordmark">Blueprint</span>
-          <span className="topbar__sub mono">Feature roadmaps</span>
+          <span className="topbar__sub mono">Task roadmaps</span>
         </div>
         <div className="topbar__tabs">
           <AppTabs
@@ -567,7 +567,7 @@ export default function App() {
       {selected ? (
         <DetailPanel
           key={selected.id}
-          feature={selected}
+          task={selected}
           editable={showEditing}
           saveState={saveState}
           error={panelError}
@@ -577,7 +577,7 @@ export default function App() {
           onDelete={removeSelected}
           onDisconnect={disconnect}
           onClose={() => setSelectedId(null)}
-          onSelectFeature={setSelectedId}
+          onSelectTask={setSelectedId}
         />
       ) : null}
 

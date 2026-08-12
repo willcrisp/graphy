@@ -31,7 +31,7 @@ export default function ContextMenu({ menu, onClose }: Props) {
   const items = menu.groups.flat()
 
   // Flip back inside the viewport once the real size is known. Measured, not
-  // guessed: label lengths vary with the feature title in the heading.
+  // guessed: label lengths vary with the task title in the heading.
   useLayoutEffect(() => {
     const box = ref.current?.getBoundingClientRect()
     if (!box) return
