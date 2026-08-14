@@ -12,11 +12,13 @@ import ModeToggle from './components/ModeToggle'
 import NodePopover from './components/NodePopover'
 import ParentPanel from './components/ParentPanel'
 import SignIn from './components/SignIn'
+import SpacingToggle from './components/SpacingToggle'
 import ThemeToggle from './components/ThemeToggle'
 import TitleBlock from './components/TitleBlock'
 import { buildBoard, buildOverview, parentIdOf } from './canvas'
 import * as optimistic from './optimistic'
 import { withCounts } from './optimistic'
+import { useSpacing } from './spacing'
 import { useTheme } from './theme'
 import type {
   AppConfig,
@@ -70,6 +72,10 @@ export default function App() {
   const [menu, setMenu] = useState<MenuSpec | null>(null)
   const [dialog, setDialog] = useState<DialogSpec | null>(null)
   const [theme, chooseTheme] = useTheme()
+  // How far apart the canvas lays the tree out. Like the theme, it is this
+  // browser's preference and not part of the board -- it is never sent anywhere
+  // and applies to whichever page is open.
+  const [spacing, chooseSpacing] = useSpacing()
 
   const isOverview = page?.kind === 'overview'
   const canEdit = Boolean(config && !config.readonly && config.authenticated)
@@ -774,6 +780,7 @@ export default function App() {
               Sign in
             </button>
           )}
+          <SpacingToggle spacing={spacing} onChange={chooseSpacing} />
           <ThemeToggle theme={theme} onChange={chooseTheme} />
         </div>
       </header>
@@ -789,6 +796,7 @@ export default function App() {
           <Graph
             key={canvas.key}
             graph={canvas}
+            spacing={spacing}
             editMode={editingTasks}
             selectedId={selectedId}
             onSelect={setSelectedId}

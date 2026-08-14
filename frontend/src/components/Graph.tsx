@@ -14,7 +14,7 @@ import '@xyflow/react/dist/style.css'
 
 import TaskNode from './TaskNode'
 import type { CanvasGraph } from '../canvas'
-import { layoutGraph } from '../layout'
+import { layoutGraph, type Spacing } from '../layout'
 
 /** The React Flow canvas: turns a `CanvasGraph` (see `canvas.ts`) plus a
  *  computed `layoutGraph` position into React Flow nodes/edges, and forwards
@@ -41,6 +41,9 @@ const EDGE_CURVATURE = 0.32
 
 interface Props {
   graph: CanvasGraph
+  /** How far apart to lay the tree out. A reader's preference held in
+   *  `App.tsx`; nothing here interprets it beyond handing it to `layoutGraph`. */
+  spacing: Spacing
   editMode: boolean
   selectedId: number | null
   onSelect: (id: number | null) => void
@@ -55,6 +58,7 @@ interface Props {
 
 export default function Graph({
   graph,
+  spacing,
   editMode,
   selectedId,
   onSelect,
@@ -70,7 +74,7 @@ export default function Graph({
     // Layout and drawing take the same edge list, computed joins included --
     // see `layoutGraph`'s note on why it no longer derives its own.
     const drawn = [...graph.edges, ...graph.structural]
-    const positions = layoutGraph(graph.nodes, drawn)
+    const positions = layoutGraph(graph.nodes, drawn, spacing)
     const byId = new Map(graph.nodes.map((task) => [task.id, task]))
     const flowNodes: Node[] = graph.nodes.flatMap((task) => {
       const position = positions.get(task.id)
@@ -134,10 +138,17 @@ export default function Graph({
     }))
 
     return { nodes: flowNodes, edges: [...rootEdges, ...flowEdges] }
-  }, [graph, editMode, selectedId])
+  }, [graph, spacing, editMode, selectedId])
 
   // Re-frame whenever the page changes. The key is the page, not the node
   // count, so adding a node does not yank the viewport out from under the user.
+  //
+  // Spacing is deliberately *not* in this list. Re-fitting after a spacing
+  // change would rescale the drawing to the same box every time, so pulling the
+  // tree in would shrink the gaps and grow the zoom in the same breath and the
+  // control would read as a zoom that never quite zooms. Left alone, the nodes
+  // keep their size and simply move: tighten and more of the board arrives in
+  // view, open it out and it spreads. The fit button is right there for after.
   useEffect(() => {
     const timer = window.setTimeout(() => fitView(fitViewOptions), 0)
     return () => window.clearTimeout(timer)

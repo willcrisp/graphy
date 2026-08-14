@@ -258,7 +258,8 @@ frontend/
   src/
     layout.ts           dagre wrapper; node dimensions computed, not measured
     theme.ts             light/dark resolution and persistence
-    persistedChoice.ts   the localStorage hook behind theme.ts
+    spacing.ts           tight/normal/wide node spacing, persistence only
+    persistedChoice.ts   the localStorage hook behind theme.ts and spacing.ts
     optimistic.ts        local mutation of the graph, mirrors services/graph.py
     api.ts               typed client, flattens server errors to one sentence
     components/          Graph, TaskNode, AppTabs, DetailPanel, TitleBlock, Modal,
@@ -290,6 +291,13 @@ agent or tool? [AGENTS.md](AGENTS.md) points at the same document.
   and none of the deletes are 204. A rejection (a cycle, a duplicate edge) rolls the
   optimistic patch back and shows the server's sentence. See
   [`CLAUDE.md`](CLAUDE.md) for the rollback ordering rules.
+- **The spacing between nodes is the reader's, not the board's.** The
+  tight/normal/wide toggle in the top right scales the gaps dagre lays out with —
+  rows and columns together, so the drawing keeps its proportions — and nothing
+  else: the same tasks sit in the same order, the nodes stay the same size, and
+  nothing is sent to the server. It is kept in `localStorage` per browser, like
+  the theme. Changing it deliberately does not re-frame the viewport, so
+  tightening brings more of the board into view instead of just zooming in.
 - **The board follows your OS light/dark setting**, and the toggle in the top right
   overrides it for good (kept in `localStorage`). The theme is resolved before first
   paint, so there is no flash of the light board on a dark desktop. Dark is a full

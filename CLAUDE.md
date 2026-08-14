@@ -165,6 +165,22 @@ Nodes are fed to dagre in `sort_order`-then-`id` order and edges in `id` order,
 because dagre's output depends on insertion order and layout stability across
 reloads is a tested requirement.
 
+The one thing about the layout a reader can change is how far apart it is drawn:
+`layoutGraph`'s third argument, a `Spacing` of `tight` / `normal` / `wide`, which
+scales dagre's `ranksep` **and** `nodesep` by one factor (`separationOf`). Both
+move together on purpose — pulling the rows in without the columns turns a wide
+board into a stack of unrelated rows — and `normal` is the pair the drawing was
+tuned at, so retuning it retunes all three. Nothing about the choice reaches the
+server: it is a property of the screen the board is being read on, not of the
+plan, so it lives in `localStorage` (`spacing.ts`, the second caller of
+`usePersistedChoice`) and rides in as a prop through `Graph.tsx`.
+
+`Graph.tsx` re-fits the viewport when the *page* changes and deliberately not
+when the spacing does. Re-fitting would rescale the drawing back into the same
+box every time, so the gaps would shrink and the zoom would grow in one motion
+and the control would read as a zoom that never zooms. Leaving the viewport
+alone is what makes tightening actually bring more of the board into view.
+
 ### The theme is one attribute on `<html>`
 
 `data-theme` is `light` or `dark`, never absent. It is written twice: by the inline
@@ -261,13 +277,16 @@ avoid.
   dismissal shared by `SignIn` and `AppDialog`. A new modal wraps its content
   in this rather than reimplementing the backdrop handlers.
 - **`components/ToggleGroup.tsx`** — the `role="group"` row of
-  `aria-pressed` buttons behind `ModeToggle` (view/edit). It is two-way
-  today; the component itself is not limited to two options.
+  `aria-pressed` buttons behind `ModeToggle` (view/edit) and `SpacingToggle`
+  (tight/normal/wide). Two-way and three-way callers share it unchanged; a new
+  one-of-N chrome switch is another caller here, not new markup.
 - **`persistedChoice.ts`**'s `usePersistedChoice` — the localStorage-seed,
-  apply-on-change, persist-on-choose wiring behind `useTheme`. It returns
-  the raw setter alongside the persisting one because
-  `useTheme` needs to track the OS preference *without* writing it to
-  storage — following the system is not an explicit choice.
+  apply-on-change, persist-on-choose wiring behind `useTheme` and
+  `useSpacing`. It returns the raw setter alongside the persisting one
+  because `useTheme` needs to track the OS preference *without* writing it to
+  storage — following the system is not an explicit choice. `apply` is
+  optional for the opposite reason: a spacing is an argument to `layoutGraph`,
+  not something written to the DOM, so it has no side effect to apply.
 - **`canvas.ts`**'s `buildBoard` / `buildOverview` — the two pages'
   server shapes flattened into the one `CanvasGraph` the canvas draws (see
   "Parent projects and the overview page"). A third thing to draw on that

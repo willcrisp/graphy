@@ -31,6 +31,36 @@ export function nodeWidth(title: string): number {
   return Math.max(MIN_WIDTH, Math.round(raw))
 }
 
+/** How far apart the tree is drawn. A reader's choice, not the board's: it is
+ *  never stored on the server and never leaves this browser, because it says
+ *  nothing about the plan -- only about the screen it is being read on. A
+ *  laptop wants the whole board at once, a wall display wants room to breathe.
+ *
+ *  Ordered loosest-last so the toggle can render it in this order and a future
+ *  step slots in without the option row having to be re-sorted by hand. */
+export const SPACINGS = ['tight', 'normal', 'wide'] as const
+export type Spacing = (typeof SPACINGS)[number]
+
+export const DEFAULT_SPACING: Spacing = 'normal'
+
+/** dagre's gaps: `ranksep` between rows, `nodesep` between siblings within one.
+ *
+ *  Both are scaled together so the drawing keeps its proportions -- pulling the
+ *  rows in without the columns would make a wide board read as a stack of
+ *  unrelated rows. `normal` is the pair the board was designed at; the other two
+ *  are that pair scaled, so retuning the default retunes all three.
+ *
+ *  `tight` does not go below the edge arrowhead plus its curve (about 40px of
+ *  rank gap), or the marker collides with the node it points at. */
+const RANKSEP = 110
+const NODESEP = 64
+const SCALE: Record<Spacing, number> = { tight: 0.55, normal: 1, wide: 1.7 }
+
+export function separationOf(spacing: Spacing): { ranksep: number; nodesep: number } {
+  const scale = SCALE[spacing] ?? SCALE[DEFAULT_SPACING]
+  return { ranksep: Math.round(RANKSEP * scale), nodesep: Math.round(NODESEP * scale) }
+}
+
 export interface Positioned {
   id: number
   x: number
@@ -55,13 +85,19 @@ export interface Positioned {
  * `app_id` leads because the overview draws every board at once: without it,
  * six boards' `sort_order`s interleave and dagre shuffles the clusters
  * together. On a single board every `app_id` is equal, so it changes nothing.
+ *
+ * `spacing` only widens or narrows the gaps between nodes -- it never changes
+ * which node sits above which, so a board keeps its shape as the reader opens
+ * it out.
  */
 export function layoutGraph(
   nodes: TaskNodeData[],
   edges: GraphEdge[],
+  spacing: Spacing = DEFAULT_SPACING,
 ): Map<number, Positioned> {
+  const { ranksep, nodesep } = separationOf(spacing)
   const graph = new dagre.graphlib.Graph()
-  graph.setGraph({ rankdir: 'TB', ranksep: 110, nodesep: 64, marginx: 48, marginy: 48 })
+  graph.setGraph({ rankdir: 'TB', ranksep, nodesep, marginx: 48, marginy: 48 })
   graph.setDefaultEdgeLabel(() => ({}))
 
   const ordered = [...nodes].sort(

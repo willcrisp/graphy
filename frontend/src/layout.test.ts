@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NODE_HEIGHT, layoutGraph, nodeWidth } from './layout'
+import { NODE_HEIGHT, SPACINGS, layoutGraph, nodeWidth, separationOf } from './layout'
 import type { TaskNodeData, GraphEdge, Status } from './types'
 
 let nextId = 1
@@ -98,6 +98,59 @@ describe('layoutGraph ordering', () => {
 
   it('returns an empty map for an empty app', () => {
     expect(layoutGraph([], []).size).toBe(0)
+  })
+})
+
+describe('spacing', () => {
+  it('widens both gaps together, in the order the options are offered', () => {
+    const gaps = SPACINGS.map(separationOf)
+    for (let i = 1; i < gaps.length; i += 1) {
+      expect(gaps[i].ranksep).toBeGreaterThan(gaps[i - 1].ranksep)
+      expect(gaps[i].nodesep).toBeGreaterThan(gaps[i - 1].nodesep)
+    }
+  })
+
+  it('keeps the tightest rank gap clear of the arrowhead', () => {
+    expect(separationOf('tight').ranksep).toBeGreaterThanOrEqual(40)
+  })
+
+  it('pushes ranks further apart as it opens out', () => {
+    const [a, b] = [node('A'), node('B')]
+    const nodes = [a, b]
+    const edges = [edge(a, b)]
+    const gapAt = (spacing: (typeof SPACINGS)[number]) => {
+      const positions = layoutGraph(nodes, edges, spacing)
+      return positions.get(b.id)!.y - positions.get(a.id)!.y
+    }
+    expect(gapAt('tight')).toBeLessThan(gapAt('normal'))
+    expect(gapAt('normal')).toBeLessThan(gapAt('wide'))
+  })
+
+  it('separates siblings further as it opens out', () => {
+    const [root, left, right] = [node('root'), node('left'), node('right')]
+    const nodes = [root, left, right]
+    const edges = [edge(root, left), edge(root, right)]
+    const spreadAt = (spacing: (typeof SPACINGS)[number]) => {
+      const positions = layoutGraph(nodes, edges, spacing)
+      return Math.abs(positions.get(left.id)!.x - positions.get(right.id)!.x)
+    }
+    expect(spreadAt('tight')).toBeLessThan(spreadAt('wide'))
+  })
+
+  it('moves nodes without reordering them, and defaults to normal', () => {
+    const [a, b, c] = [node('A'), node('B'), node('C')]
+    const nodes = [a, b, c]
+    const edges = [edge(a, b), edge(a, c)]
+    const normal = layoutGraph(nodes, edges)
+    expect(normal).toEqual(layoutGraph(nodes, edges, 'normal'))
+    for (const spacing of SPACINGS) {
+      const positions = layoutGraph(nodes, edges, spacing)
+      for (const n of nodes) {
+        expect(positions.get(n.id)!.rank).toBe(normal.get(n.id)!.rank)
+        // Widths come from the label, never from the spacing.
+        expect(positions.get(n.id)!.width).toBe(normal.get(n.id)!.width)
+      }
+    }
   })
 })
 
