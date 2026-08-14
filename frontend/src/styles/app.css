@@ -347,6 +347,11 @@
   animation-delay: var(--stagger, 0ms);
 }
 
+/* A node settles in from the rank before it, so the drift has to follow the
+   direction the graph builds -- drifting down while the graph reads left to
+   right runs across the flow instead of along it. This is the only thing the
+   `data-graph-dir` attribute on <html> is for; layout itself takes the
+   direction as an argument (direction.ts). */
 @keyframes task-settle {
   from {
     opacity: 0;
@@ -356,6 +361,21 @@
     opacity: 1;
     transform: none;
   }
+}
+
+@keyframes task-settle-across {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+[data-graph-dir='across'] .task {
+  animation-name: task-settle-across;
 }
 
 /* Edges have to leave from the centre of the *label*, not the centre of the
@@ -382,6 +402,17 @@
   gap: var(--s2);
   padding: 0 calc(var(--glyph-slot) + var(--s2)) 0 0;
   min-width: 0;
+}
+
+/* None of that applies building across, where the handles sit on the box's
+   left and right edges rather than on a vertical axis through its centre:
+   there is no axis for the title to be centred on, and the padding only
+   pushes the outgoing edge a glyph's width past the end of the label while
+   the incoming one arrives hard against the glyph. Dropping it splits the
+   slack in nodeWidth's estimate evenly between the two sides, so an edge
+   meets the node the same distance from the label at both ends. */
+[data-graph-dir='across'] .canvas .task__body {
+  padding-right: 0;
 }
 
 /* Collapses the "Done"/"In progress"/etc. word that follows the glyph in the

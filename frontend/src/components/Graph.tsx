@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css'
 
 import TaskNode from './TaskNode'
 import type { CanvasGraph } from '../canvas'
+import type { Direction } from '../direction'
 import { layoutGraph } from '../layout'
 
 /** The React Flow canvas: turns a `CanvasGraph` (see `canvas.ts`) plus a
@@ -41,6 +42,10 @@ const EDGE_CURVATURE = 0.32
 
 interface Props {
   graph: CanvasGraph
+  /** Which way the graph builds. Goes to `layoutGraph` and to every node, so
+   *  the positions and the handles edges are drawn between can never disagree
+   *  about which way is forward. */
+  direction: Direction
   editMode: boolean
   selectedId: number | null
   onSelect: (id: number | null) => void
@@ -55,6 +60,7 @@ interface Props {
 
 export default function Graph({
   graph,
+  direction,
   editMode,
   selectedId,
   onSelect,
@@ -70,7 +76,7 @@ export default function Graph({
     // Layout and drawing take the same edge list, computed joins included --
     // see `layoutGraph`'s note on why it no longer derives its own.
     const drawn = [...graph.edges, ...graph.structural]
-    const positions = layoutGraph(graph.nodes, drawn)
+    const positions = layoutGraph(graph.nodes, drawn, direction)
     const byId = new Map(graph.nodes.map((task) => [task.id, task]))
     const flowNodes: Node[] = graph.nodes.flatMap((task) => {
       const position = positions.get(task.id)
@@ -83,7 +89,7 @@ export default function Graph({
           width: position.width,
           height: position.height,
           selected: task.id === selectedId,
-          data: { task, editable: editMode, rank: position.rank },
+          data: { task, editable: editMode, rank: position.rank, direction },
           ariaLabel:
             task.kind === 'task'
               ? `${task.title}, ${task.status}`
@@ -134,14 +140,17 @@ export default function Graph({
     }))
 
     return { nodes: flowNodes, edges: [...rootEdges, ...flowEdges] }
-  }, [graph, editMode, selectedId])
+  }, [graph, direction, editMode, selectedId])
 
   // Re-frame whenever the page changes. The key is the page, not the node
   // count, so adding a node does not yank the viewport out from under the user.
+  // Direction is in here for the same reason the page is: turning the graph a
+  // quarter turn changes the shape of the whole drawing, so the framing the
+  // viewport had is no longer the right one.
   useEffect(() => {
     const timer = window.setTimeout(() => fitView(fitViewOptions), 0)
     return () => window.clearTimeout(timer)
-  }, [graph.key, fitView])
+  }, [graph.key, direction, fitView])
 
   if (graph.empty) {
     return (

@@ -165,6 +165,40 @@ Nodes are fed to dagre in `sort_order`-then-`id` order and edges in `id` order,
 because dagre's output depends on insertion order and layout stability across
 reloads is a tested requirement.
 
+### The graph builds one of two ways, and that is the only choice
+
+`direction.ts` owns a second, independent axis alongside the theme: `down`
+(dagre `TB`, the default and what this app has always drawn) or `across` (`LR`,
+the same graph turned a quarter turn). `resolveDirection(stored)` is the whole
+rule — there is no system preference to follow, so anything unrecognised is
+`down` — and it is pure, so `direction.test.ts` covers it without a DOM.
+
+`layoutGraph` takes the direction as an **argument** rather than reading it
+from anywhere, so it stays pure and both directions are testable, and `Graph.tsx`
+hands the same value to `layoutGraph` and to every node's `data`. Two things
+follow the direction and must not be allowed to disagree with it:
+
+- **Rank** is read off `y` building down and off `x` building across, and off
+  the node's **centre**, not the top-left corner `layoutGraph` returns. Every
+  node is `NODE_HEIGHT` tall, so the two agree building down; nodes hug their
+  labels widthwise, so building across two siblings' left edges sit half a
+  title apart and would be counted as two ranks.
+- **Handle placement** (`HANDLE_SIDES` in `TaskNode.tsx`) is top/bottom
+  building down, left/right building across. It is the one part of the drawing
+  CSS cannot do — React Flow anchors edge paths to the handles themselves.
+
+`ranksep`/`nodesep` are per-direction (`SPACING` in `layout.ts`), because
+rotating the graph swaps which screen axis each governs and a node is short but
+label-wide — siblings side by side need a much wider gap than siblings stacked.
+
+`applyDirection` writes `data-graph-dir` on `<html>`, and CSS uses it for
+exactly two things: settling a node in *along* the direction it builds, and
+dropping `.task__body`'s glyph-cancelling right padding, which exists to centre
+the title on the vertical handle axis and has nothing to centre on when the
+handles are on the left and right edges. There is no pre-paint script for it,
+unlike the theme — nothing is painted either way until React lays the canvas
+out, so there is no flash to head off.
+
 ### The theme is one attribute on `<html>`
 
 `data-theme` is `light` or `dark`, never absent. It is written twice: by the inline
@@ -184,11 +218,14 @@ reads without colour, the hue only reinforces it.
 
 ### The canvas has its own palette, and the drawing is fixed
 
-There is one way to draw the graph: a vertical dagre layout of borderless
-glyph-and-label nodes joined by flowing bezier edges with arrowheads. (There used to
-be a second, `blueprint` — bordered cards, right-angle edges, laid out left to right —
-selectable through a `data-graph-style` attribute and a toggle in the topbar. It's
-gone: no attribute, no toggle, no `graphStyle.ts`.)
+There is one way to draw the graph: a dagre layout of borderless
+glyph-and-label nodes joined by flowing bezier edges with arrowheads. The only
+thing a reader may change about it is which way it builds — down or across,
+see "The graph builds one of two ways" above — and that turns the same drawing
+a quarter turn rather than picking a different one. (There used to be a second
+drawing, `blueprint` — bordered cards, right-angle edges — selectable through a
+`data-graph-style` attribute and a toggle in the topbar. It's gone: no
+attribute, no toggle, no `graphStyle.ts`.)
 
 The canvas keeps its own ground, separate from the chrome around it — greener and
 further from mid-grey than the topbar and panel, near-black in dark and near-white in
@@ -206,9 +243,8 @@ not the canvas scope's — unless something between them redeclares `color: var(
 That redeclaration sits right next to the canvas token overrides in `tokens.css`; if
 new canvas-scoped tokens stop showing up, this is the first thing to check.
 
-`layout.ts` ranks top-to-bottom (`rankdir: 'TB'`), so rank is read off `y`, and
-`TaskNode`'s `Handle`s sit top/bottom. Handle placement is the one part of the drawing
-that can't be done in CSS — React Flow anchors edge paths to them. Node dimensions are
+Which axis `layout.ts` ranks on, and with it where `TaskNode`'s `Handle`s sit, is the
+direction's business — see that section. Node dimensions are the same either way:
 `NODE_HEIGHT` (constant, since no detail paragraph is drawn inline) and `nodeWidth()`,
 which hugs the label.
 
@@ -261,11 +297,15 @@ avoid.
   dismissal shared by `SignIn` and `AppDialog`. A new modal wraps its content
   in this rather than reimplementing the backdrop handlers.
 - **`components/ToggleGroup.tsx`** — the `role="group"` row of
-  `aria-pressed` buttons behind `ModeToggle` (view/edit). It is two-way
-  today; the component itself is not limited to two options.
+  `aria-pressed` buttons behind `ModeToggle` (view/edit) and
+  `DirectionToggle` (down/across). Both are two-way; the component itself is
+  not limited to two options.
 - **`persistedChoice.ts`**'s `usePersistedChoice` — the localStorage-seed,
-  apply-on-change, persist-on-choose wiring behind `useTheme`. It returns
-  the raw setter alongside the persisting one because
+  apply-on-change, persist-on-choose wiring behind `useTheme` and
+  `useDirection`. What stays per-caller is the resolver (a fallback rule is
+  per-axis: the theme falls back to the OS, the direction has nothing to fall
+  back to) and the `apply` — each writes its own attribute on `<html>`. It
+  returns the raw setter alongside the persisting one because
   `useTheme` needs to track the OS preference *without* writing it to
   storage — following the system is not an explicit choice.
 - **`canvas.ts`**'s `buildBoard` / `buildOverview` — the two pages'

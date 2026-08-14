@@ -1,4 +1,5 @@
 import dagre from '@dagrejs/dagre'
+import type { Direction } from './direction'
 import type { TaskNodeData, GraphEdge } from './types'
 
 /** Node dimensions are fixed and known before layout. Measuring the DOM would
@@ -31,6 +32,19 @@ export function nodeWidth(title: string): number {
   return Math.max(MIN_WIDTH, Math.round(raw))
 }
 
+/** Spacing per direction. `ranksep` separates one rank from the next and
+ *  `nodesep` separates siblings within a rank, so rotating the graph swaps
+ *  which screen axis each of them governs -- and the two axes are not
+ *  interchangeable, because a node is short (NODE_HEIGHT) and as wide as its
+ *  label. Building down, siblings sit side by side and need a wide gap to read
+ *  as separate; building across they stack, and a gap of about one node height
+ *  is already unambiguous. Carrying the down values into across would leave the
+ *  rows floating a long way apart. */
+const SPACING = {
+  down: { rankdir: 'TB', ranksep: 110, nodesep: 64 },
+  across: { rankdir: 'LR', ranksep: 96, nodesep: 30 },
+} as const
+
 export interface Positioned {
   id: number
   x: number
@@ -55,13 +69,21 @@ export interface Positioned {
  * `app_id` leads because the overview draws every board at once: without it,
  * six boards' `sort_order`s interleave and dagre shuffles the clusters
  * together. On a single board every `app_id` is equal, so it changes nothing.
+ *
+ * `direction` turns the whole drawing a quarter turn (see `direction.ts`).
+ * Nothing else about the layout changes with it -- same ranks, same order,
+ * same sizes -- so the two directions are the same graph read along a
+ * different axis. It is a caller's argument rather than module state so this
+ * stays pure and both directions are testable.
  */
 export function layoutGraph(
   nodes: TaskNodeData[],
   edges: GraphEdge[],
+  direction: Direction = 'down',
 ): Map<number, Positioned> {
+  const { rankdir, ranksep, nodesep } = SPACING[direction]
   const graph = new dagre.graphlib.Graph()
-  graph.setGraph({ rankdir: 'TB', ranksep: 110, nodesep: 64, marginx: 48, marginy: 48 })
+  graph.setGraph({ rankdir, ranksep, nodesep, marginx: 48, marginy: 48 })
   graph.setDefaultEdgeLabel(() => ({}))
 
   const ordered = [...nodes].sort(
@@ -97,10 +119,18 @@ export function layoutGraph(
     }
   })
 
-  // Rank = layout row, i.e. position along the axis dagre ranks on -- y, since
-  // the graph runs top-to-bottom. Derived from the coordinate rather than read
-  // out of dagre's internals, which are not part of its public API.
-  const axis = (node: (typeof raw)[number]) => node.y
+  // Rank = layout row, i.e. position along the axis dagre ranks on -- y when
+  // the graph runs top-to-bottom, x when it runs left to right. Derived from
+  // the coordinate rather than read out of dagre's internals, which are not
+  // part of its public API.
+  //
+  // It has to be read off the *centre*, which is what dagre shares across a
+  // rank, not the corner converted to above: every node is NODE_HEIGHT tall so
+  // the two agree building down, but nodes hug their labels widthwise, so
+  // building across two siblings' left edges sit half a title apart and would
+  // otherwise be counted as two ranks.
+  const axis = (node: (typeof raw)[number]) =>
+    direction === 'across' ? node.x + node.width / 2 : node.y + node.height / 2
   const rows = [...new Set(raw.map((node) => Math.round(axis(node))))].sort(
     (a, b) => a - b,
   )

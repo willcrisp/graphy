@@ -101,6 +101,61 @@ describe('layoutGraph ordering', () => {
   })
 })
 
+describe('layoutGraph direction', () => {
+  it('defaults to building downward', () => {
+    const [a, b] = [node('A'), node('B')]
+    const nodes = [a, b]
+    const edges = [edge(a, b)]
+    expect(layoutGraph(nodes, edges)).toEqual(layoutGraph(nodes, edges, 'down'))
+  })
+
+  it('puts a dependency to the right of its dependant when built across', () => {
+    const [a, b] = [node('A'), node('B')]
+    const positions = layoutGraph([a, b], [edge(a, b)], 'across')
+    expect(positions.get(a.id)!.x).toBeLessThan(positions.get(b.id)!.x)
+  })
+
+  it('reads rank off the axis it builds along', () => {
+    const [a, b, c] = [node('A'), node('B'), node('C')]
+    const nodes = [a, b, c]
+    const edges = [edge(a, b), edge(b, c)]
+    const across = layoutGraph(nodes, edges, 'across')
+    // Same ranks as building down: only the axis they are read off changes.
+    for (const [index, task] of nodes.entries()) {
+      expect(across.get(task.id)!.rank).toBe(index)
+      expect(across.get(task.id)!.rank).toBe(layoutGraph(nodes, edges).get(task.id)!.rank)
+    }
+  })
+
+  it('stacks siblings vertically within a rank when built across', () => {
+    const [root, first, second] = [node('root'), node('first'), node('second')]
+    const positions = layoutGraph(
+      [root, first, second],
+      [edge(root, first), edge(root, second)],
+      'across',
+    )
+    const a = positions.get(first.id)!
+    const b = positions.get(second.id)!
+    // Same rank, even though their differing widths put their left edges in
+    // different places -- rank is read off the centre for exactly this reason.
+    expect(a.rank).toBe(b.rank)
+    expect(a.x).not.toBe(b.x)
+    expect(a.x + a.width / 2).toBe(b.x + b.width / 2)
+    expect(Math.abs(a.y - b.y)).toBeGreaterThanOrEqual(NODE_HEIGHT)
+  })
+
+  it('is stable in both directions', () => {
+    const [a, b, c, d] = [node('A'), node('B'), node('C'), node('D')]
+    const nodes = [a, b, c, d]
+    const edges = [edge(a, b), edge(a, c), edge(b, d), edge(c, d)]
+    const first = layoutGraph(nodes, edges, 'across')
+    const second = layoutGraph([...nodes].reverse(), [...edges].reverse(), 'across')
+    for (const id of nodes.map((n) => n.id)) {
+      expect(second.get(id)).toEqual(first.get(id))
+    }
+  })
+})
+
 describe('layoutGraph sizing', () => {
   it('sizes nodes to the label rather than to a fixed card width', () => {
     const positions = layoutGraph(

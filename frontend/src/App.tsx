@@ -7,6 +7,7 @@ import AppDialog, { type DialogSpec } from './components/AppDialog'
 import AppTabs, { OVERVIEW_TAB } from './components/AppTabs'
 import ContextMenu, { type MenuItem, type MenuSpec } from './components/ContextMenu'
 import DetailPanel, { type SaveState } from './components/DetailPanel'
+import DirectionToggle from './components/DirectionToggle'
 import Graph from './components/Graph'
 import ModeToggle from './components/ModeToggle'
 import NodePopover from './components/NodePopover'
@@ -15,6 +16,7 @@ import SignIn from './components/SignIn'
 import ThemeToggle from './components/ThemeToggle'
 import TitleBlock from './components/TitleBlock'
 import { buildBoard, buildOverview, parentIdOf } from './canvas'
+import { useDirection } from './direction'
 import * as optimistic from './optimistic'
 import { withCounts } from './optimistic'
 import { useTheme } from './theme'
@@ -70,6 +72,7 @@ export default function App() {
   const [menu, setMenu] = useState<MenuSpec | null>(null)
   const [dialog, setDialog] = useState<DialogSpec | null>(null)
   const [theme, chooseTheme] = useTheme()
+  const [direction, chooseDirection] = useDirection()
 
   const isOverview = page?.kind === 'overview'
   const canEdit = Boolean(config && !config.readonly && config.authenticated)
@@ -774,6 +777,7 @@ export default function App() {
               Sign in
             </button>
           )}
+          <DirectionToggle direction={direction} onChange={chooseDirection} />
           <ThemeToggle theme={theme} onChange={chooseTheme} />
         </div>
       </header>
@@ -789,6 +793,7 @@ export default function App() {
           <Graph
             key={canvas.key}
             graph={canvas}
+            direction={direction}
             editMode={editingTasks}
             selectedId={selectedId}
             onSelect={setSelectedId}

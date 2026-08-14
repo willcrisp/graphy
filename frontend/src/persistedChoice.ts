@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 
 /**
- * The localStorage-backed "pick one, remember it" wiring behind `useTheme`:
- * seed state once from a caller-supplied resolver, apply it as a side effect
- * whenever it changes, and persist an explicit choice back to storage under
- * `key`.
+ * The localStorage-backed "pick one, remember it" wiring behind `useTheme` and
+ * `useDirection`: seed state once from a caller-supplied resolver, apply it as
+ * a side effect whenever it changes, and persist an explicit choice back to
+ * storage under `key`.
  *
- * What's deliberately *not* shared with a future second caller: the resolver
- * (a fallback rule is per-axis -- theme falls back to the OS preference,
- * something else may have nothing to fall back to) and the `apply` function
- * (the attribute each writes to `<html>` is a distinct axis -- see CLAUDE.md's
- * "Graph style is a second, independent attribute"). Only the mechanics are
- * common.
+ * What's deliberately *not* shared between the two callers: the resolver
+ * (a fallback rule is per-axis -- theme falls back to the OS preference, the
+ * direction has nothing to fall back to and is simply `down`) and the `apply`
+ * function (`data-theme` and `data-graph-dir` are distinct axes on `<html>`,
+ * and neither hook has any business writing the other's). Only the mechanics
+ * are common.
  *
  * The raw setter is returned alongside the persisting `choose` because
  * `useTheme` needs to track the OS preference without writing it to storage
