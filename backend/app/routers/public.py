@@ -8,7 +8,14 @@ from fastapi.responses import PlainTextResponse
 from app.auth import is_authenticated
 from app.deps import SessionDep, SettingsDep
 from app.instructions import render as render_instructions
-from app.schemas import AppSummary, ConfigOut, GraphOut, OverviewOut, ParentOut
+from app.schemas import (
+    AppSummary,
+    ConfigOut,
+    GraphOut,
+    MilestoneOut,
+    OverviewOut,
+    ParentOut,
+)
 from app.services import graph as service
 
 router = APIRouter(prefix="/api", tags=["public"])
@@ -25,9 +32,13 @@ async def list_apps(session: SessionDep) -> list[AppSummary]:
 
 @router.get("/apps/{key}/graph", response_model=GraphOut)
 async def get_graph(key: str, session: SessionDep) -> GraphOut:
-    app, nodes, edges, last_updated = await service.get_graph(session, key)
+    app, nodes, edges, milestones, last_updated = await service.get_graph(session, key)
     return GraphOut(
-        app=app, nodes=nodes, edges=edges, last_updated=last_updated
+        app=app,
+        nodes=nodes,
+        edges=edges,
+        milestones=[MilestoneOut.model_validate(m) for m in milestones],
+        last_updated=last_updated,
     )
 
 

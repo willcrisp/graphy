@@ -73,10 +73,20 @@ boundary.
   independent boards on the overview canvas. Deleting one detaches its apps
   (`ON DELETE SET NULL`) and never deletes a board. Deliberately flat — a
   parent has no parent.
+- **Milestone** — a dated line drawn across one board: "everything above here
+  by Q1". A `label`, an optional `due_on` calendar date, and a `position`.
+  `position` is the whole ordering and is explicit — a milestone is *appended*
+  on creation and moved by hand afterwards, because `due_on` is optional and a
+  date that disagrees with its neighbours should read as a mistake rather than
+  silently re-sort the sheet. Belongs to one app; the overview draws none of
+  them (a rule across six boards would cut through five other calendars).
 - **Node** ("task" everywhere user-facing) — belongs to exactly one app.
   `external_ref` is an opaque string, unique per app, meant for an external
   importer to recognise a node it already created (see `docs/API.md`'s sibling
-  guide above); the UI never sets it.
+  guide above); the UI never sets it. `milestone_id` is the line the task is
+  due by, or `null` for "no date committed" — an undated task is
+  *unconstrained*, not "last", so it lays out wherever its dependencies put
+  it.
 - **Edge** ("dependency"/"connection" user-facing) — directed, `source_id ->
   target_id`, meaning source happens before target. Cannot cross apps, target
   itself, duplicate an existing edge, or close a cycle (DFS-checked on every
@@ -90,7 +100,7 @@ boundary.
 |---|---|---|
 | `GET /api/health` | — | `{"status": "ok"}` |
 | `GET /api/apps` | — | `AppSummary[]` — every app plus its per-status task counts |
-| `GET /api/apps/{key}/graph` | — | `GraphOut` — `{app, nodes, edges, last_updated}` for one board |
+| `GET /api/apps/{key}/graph` | — | `GraphOut` — `{app, nodes, edges, milestones, last_updated}` for one board |
 | `GET /api/parents` | — | `ParentOut[]` — every parent project |
 | `GET /api/overview` | — | `OverviewOut` — `{parents, apps, nodes, edges, last_updated}`: every board at once, told apart by `app_id` |
 | `GET /api/config` | — | `{"readonly": bool, "authenticated": bool}` |
@@ -129,10 +139,14 @@ change is the structure *between* boards, so they answer with the whole
 | `DELETE /api/nodes/{id}` | — | `BoardOut` = `{graph, apps}` — cascades the node's edges; does **not** reparent its children, they become layout roots |
 | `POST /api/apps/{key}/edges` | `{"source_id": int, "target_id": int}` | `EdgeMutationOut` = `{edge, graph, apps}` |
 | `DELETE /api/edges/{id}` | — | `BoardOut` = `{graph, apps}` |
+| `POST /api/apps/{key}/milestones` | `{"label": string, "due_on"?: "YYYY-MM-DD"\|null}` | `MilestoneMutationOut` = `{milestone, graph, apps}` — always appended last |
+| `PATCH /api/milestones/{id}` | `{"label"?, "due_on"?, "position"?}`, same `exclude_unset` rule as nodes | `MilestoneMutationOut`. `position` is an **index into the board's run of milestones**, not a number to store: the run is re-sorted around the moved one and renumbered from zero, and a value past the end lands last |
+| `DELETE /api/milestones/{id}` | — | `BoardOut` = `{graph, apps}` — tasks due by it survive and go undated (`SET NULL`) |
 
 `AppSummary` = `AppOut` (`{id, key, name, accent, parent_id, sort_order}`) plus
 `counts: {done, wip, todo, blocked}`. `NodeOut` adds `id, app_id, title,
-detail, status, external_ref, sort_order, created_at, updated_at` (timestamps
+detail, status, external_ref, milestone_id, sort_order, created_at,
+updated_at` (timestamps
 are UTC, always timezone-aware in the response even though SQLite stores them
 naive — see `_as_utc` in `schemas.py`). `EdgeOut` is `{id, app_id, source_id,
 target_id}`. `ParentOut` is `{id, name, detail, sort_order, created_at,
@@ -152,6 +166,8 @@ or the database:
   `^#[0-9A-Fa-f]{6}$`.
 - Parent `name`: 1–128 chars, trimmed; `detail` follows the same rule as a
   node's.
+- Milestone `label`: 1–64 chars, trimmed, rejected if blank. `due_on`, if
+  given, must be an ISO calendar date. `position` must be ≥ 0.
 
 ## Invariants (checked in `services/graph.py`, not the routers)
 
@@ -166,6 +182,18 @@ or the database:
 - The last app in the database cannot be deleted.
 - Parent project names are unique, compared case-insensitively in the service
   layer (so the refusal is a sentence) with a DB unique constraint behind it.
+- **Nothing may depend on work scheduled after it.** A dependency says "source
+  finishes before target starts" and a milestone says "this is done by that
+  line", so a task's milestone may never be earlier than that of anything it
+  depends on — directly *or through any chain of dependencies*. Checked from
+  the three directions that can break it: adding an edge, moving a task to a
+  different line, and moving a line past another line. Deleting anything, and
+  appending a new last milestone, can only relax the constraint and are not
+  checked. Undated tasks carry the constraint through without ever failing on
+  their own account, which is what makes `milestone_id: null` mean
+  unconstrained. The refusal names the two tasks and both lines, picking the
+  *nearest* offending ancestor among equally-late candidates.
+- A task can only be dated by a milestone on its own board.
 
 Every rule here applies identically to HTTP traffic, `scripts/seed.py`, and
 the test suite — routers never validate independently, they just translate

@@ -1,12 +1,13 @@
-"""SQLAlchemy models. Five tables, kept deliberately small."""
+"""SQLAlchemy models. Six tables, kept deliberately small."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -83,6 +84,50 @@ class App(Base):
     edges: Mapped[list[Edge]] = relationship(
         back_populates="app", cascade="all, delete-orphan", passive_deletes=True
     )
+    milestones: Mapped[list[Milestone]] = relationship(
+        back_populates="app", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class Milestone(Base):
+    """A dated line drawn across one board: "everything above here by Q1".
+
+    Belongs to exactly one app, like a node -- boards keep their own calendars,
+    and the overview does not draw these at all (see `canvas.ts`).
+
+    `position` is the whole ordering story and it is explicit: a milestone is
+    appended on creation and moved by hand afterwards. `due_on` is optional and
+    deliberately does *not* drive the order -- a board can have an undated
+    "Beta" between two dated quarters, and a date that disagrees with its
+    neighbours should be visible as a mistake rather than silently re-sorting
+    the sheet under the person who typed it.
+
+    The line is a real constraint, not an annotation: a task pointing at this
+    milestone is laid out above the rule, and a task pointing at the next one
+    below it. `services/graph.py` refuses any dependency that would need to run
+    backwards through a rule to be satisfied.
+    """
+
+    __tablename__ = "milestone"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(
+        ForeignKey("app.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Not unique per app: a reorder renumbers the whole run, and a unique
+    # constraint would fail on the transient collision halfway through it.
+    # Ties break on id, so the order is total either way.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    app: Mapped[App] = relationship(back_populates="milestones")
 
 
 class Node(Base):
@@ -111,6 +156,12 @@ class Node(Base):
     # can look a node up by it instead of guessing from the title. Never
     # interpreted by this app -- no format is assumed or validated.
     external_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Which milestone this task is due by, or NULL for "no date committed".
+    # SET NULL rather than CASCADE, for the same reason App.parent_id is:
+    # deleting the line must not delete the work underneath it.
+    milestone_id: Mapped[int | None] = mapped_column(
+        ForeignKey("milestone.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # One per app, created alongside it and never through the ordinary node
     # endpoints (NodeCreate has no such field). Represents the app itself as
     # the single top-level ancestor of the graph; see services/graph.py.

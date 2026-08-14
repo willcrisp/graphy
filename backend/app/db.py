@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models import Base
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 #: Columns added to an existing table after that table first shipped.
 #: `create_all` creates missing *tables* but never alters an existing one, so a
@@ -28,6 +28,9 @@ SCHEMA_VERSION = "2"
 _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # Schema 2: parent projects.
     ("app", "parent_id", "INTEGER REFERENCES parent(id) ON DELETE SET NULL"),
+    # Schema 3: milestones. The `milestone` table itself is created by
+    # create_all; only this column lands on a table that already existed.
+    ("node", "milestone_id", "INTEGER REFERENCES milestone(id) ON DELETE SET NULL"),
 )
 
 

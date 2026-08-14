@@ -13,6 +13,7 @@ function node(title: string, detail: string | null = null): TaskNodeData {
     detail,
     status: 'todo' as Status,
     external_ref: null,
+    milestone_id: null,
     is_root: false,
     sort_order: id,
     created_at: '2026-01-01T00:00:00Z',
@@ -109,5 +110,70 @@ describe('layoutGraph sizing', () => {
     )
     const [short, long] = [...positions.values()].sort((a, b) => a.width - b.width)
     expect(short.width).toBeLessThan(long.width)
+  })
+})
+
+describe('spanning nodes', () => {
+  it('stretches a rule across the drawing and overhangs it both sides', () => {
+    const [a, b, rule] = [node('A'), node('B'), node('Q1')]
+    const positions = layoutGraph(
+      [a, b, rule],
+      [edge(a, b), edge(a, rule)],
+      new Set([rule.id]),
+    )
+
+    const left = Math.min(positions.get(a.id)!.x, positions.get(b.id)!.x)
+    const right = Math.max(
+      positions.get(a.id)!.x + positions.get(a.id)!.width,
+      positions.get(b.id)!.x + positions.get(b.id)!.width,
+    )
+    const laid = positions.get(rule.id)!
+
+    expect(laid.x).toBeLessThan(left)
+    expect(laid.x + laid.width).toBeGreaterThan(right)
+  })
+
+  it('does not let a rule widen the drawing it measures', () => {
+    // Bounds are taken from the real nodes only. Including the rule's own box
+    // would make it grow a little further on every layout pass.
+    const [a, rule] = [node('A'), node('Q1')]
+    const spans = new Set([rule.id])
+    const once = layoutGraph([a, rule], [edge(a, rule)], spans)
+    const twice = layoutGraph([a, rule], [edge(a, rule)], spans)
+
+    expect(twice.get(rule.id)!.width).toBe(once.get(rule.id)!.width)
+    expect(twice.get(a.id)!.x).toBe(once.get(a.id)!.x)
+  })
+
+  it('ranks a task above the rule it points at and below the one before it', () => {
+    // The whole point of the ordering edges: layout, not decoration.
+    const [root, q1, q2, first, second] = [
+      node('Root'),
+      node('Q1'),
+      node('Q2'),
+      node('First'),
+      node('Second'),
+    ]
+    const positions = layoutGraph(
+      [root, q1, q2, first, second],
+      [
+        edge(root, q1),
+        edge(q1, q2),
+        edge(first, q1),
+        edge(second, q2),
+        edge(q1, second),
+      ],
+      new Set([q1.id, q2.id]),
+    )
+
+    expect(positions.get(first.id)!.y).toBeLessThan(positions.get(q1.id)!.y)
+    expect(positions.get(second.id)!.y).toBeGreaterThan(positions.get(q1.id)!.y)
+    expect(positions.get(second.id)!.y).toBeLessThan(positions.get(q2.id)!.y)
+  })
+
+  it('leaves a rule alone when there is nothing else to span', () => {
+    const rule = node('Q1')
+    const positions = layoutGraph([rule], [], new Set([rule.id]))
+    expect(Number.isFinite(positions.get(rule.id)!.width)).toBe(true)
   })
 })

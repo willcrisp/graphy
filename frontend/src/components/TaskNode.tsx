@@ -15,8 +15,15 @@ export interface TaskNodeProps extends Record<string, unknown> {
 }
 
 /** The word in the annotation slot where a task shows its status. A root and a
- *  parent project have none -- they say what they are instead. */
-const KIND_LABEL = { root: 'Board', parent: 'Parent project' } as const
+ *  parent project have none -- they say what they are instead. A milestone
+ *  never reaches this component (`Graph.tsx` routes it to `MilestoneNode`, which
+ *  draws a rule rather than a pill), and is listed only to keep the lookup
+ *  exhaustive over `NodeKind`. */
+const KIND_LABEL = {
+  root: 'Board',
+  parent: 'Parent project',
+  milestone: 'Milestone',
+} as const
 
 export default function TaskNode({ data }: NodeProps) {
   const { task, editable, rank } = data as unknown as TaskNodeProps

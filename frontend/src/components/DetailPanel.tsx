@@ -9,6 +9,7 @@ import {
   STATUSES,
   STATUS_GLYPH,
   STATUS_LABEL,
+  type Milestone,
   type TaskNodeData,
   type Status,
 } from '../types'
@@ -22,7 +23,15 @@ interface Props {
   error: string | null
   incoming: TaskNodeData[]
   outgoing: TaskNodeData[]
-  onSave: (changes: { title?: string; detail?: string | null; status?: Status }) => void
+  /** The board's dated lines, in order. Empty on a board with no calendar and
+   *  on the overview, where the picker is not offered at all. */
+  milestones: Milestone[]
+  onSave: (changes: {
+    title?: string
+    detail?: string | null
+    status?: Status
+    milestone_id?: number | null
+  }) => void
   onDelete: () => void
   onDisconnect: (otherId: number, direction: 'in' | 'out') => void
   onClose: () => void
@@ -36,6 +45,7 @@ export default function DetailPanel({
   error,
   incoming,
   outgoing,
+  milestones,
   onSave,
   onDelete,
   onDisconnect,
@@ -133,6 +143,32 @@ export default function DetailPanel({
                 ))}
               </div>
             </fieldset>
+
+            {milestones.length ? (
+              <label className="field">
+                <span className="field__label mono">Due by</span>
+                <select
+                  className="field__input field__input--select"
+                  value={task.milestone_id ?? ''}
+                  onChange={(event) =>
+                    onSave({
+                      milestone_id: event.target.value ? Number(event.target.value) : null,
+                    })
+                  }
+                >
+                  {/* No date is a real answer, not a missing one: an undated
+                      task is unconstrained and lays out wherever its
+                      dependencies put it. */}
+                  <option value="">No date set</option>
+                  {milestones.map((milestone) => (
+                    <option key={milestone.id} value={milestone.id}>
+                      {milestone.label}
+                      {milestone.due_on ? ` — ${milestone.due_on}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="field">
               <span className="field__label mono">Detail</span>

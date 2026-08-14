@@ -18,6 +18,9 @@ MUTATIONS = [
     ("DELETE", "/api/nodes/{node}", None),
     ("POST", "/api/apps/alpha/edges", {"source_id": 1, "target_id": 2}),
     ("DELETE", "/api/edges/1", None),
+    ("POST", "/api/apps/alpha/milestones", {"label": "Q1"}),
+    ("PATCH", "/api/milestones/1", {"label": "Q2"}),
+    ("DELETE", "/api/milestones/1", None),
 ]
 
 

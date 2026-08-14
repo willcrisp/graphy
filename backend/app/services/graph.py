@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, Edge, Node, Parent
+from app.models import App, Edge, Milestone, Node, Parent
 from app.schemas import (
     AppSummary,
     BoardOut,
     GraphOut,
+    MilestoneOut,
     OverviewOut,
     ParentOut,
     StatusCounts,
@@ -74,7 +75,7 @@ async def get_app_by_id(session: AsyncSession, app_id: int) -> App:
 
 async def get_graph(
     session: AsyncSession, key: str
-) -> tuple[App, list[Node], list[Edge], datetime | None]:
+) -> tuple[App, list[Node], list[Edge], list[Milestone], datetime | None]:
     app = await get_app(session, key)
     nodes = (
         (
@@ -92,8 +93,11 @@ async def get_graph(
         .scalars()
         .all()
     )
+    milestones = await list_milestones(session, app.id)
+    # Milestones deliberately do not count towards this. "Revised" means the
+    # work moved, and moving a rule up the sheet is not work moving.
     last_updated = max((node.updated_at for node in nodes), default=None)
-    return app, list(nodes), list(edges), last_updated
+    return app, list(nodes), list(edges), milestones, last_updated
 
 
 async def app_summaries(session: AsyncSession) -> list[AppSummary]:
@@ -113,9 +117,15 @@ async def app_summaries(session: AsyncSession) -> list[AppSummary]:
 
 async def get_board(session: AsyncSession, key: str) -> BoardOut:
     """The whole redraw payload: one app's graph plus every app's counts."""
-    app, nodes, edges, last_updated = await get_graph(session, key)
+    app, nodes, edges, milestones, last_updated = await get_graph(session, key)
     return BoardOut(
-        graph=GraphOut(app=app, nodes=nodes, edges=edges, last_updated=last_updated),
+        graph=GraphOut(
+            app=app,
+            nodes=nodes,
+            edges=edges,
+            milestones=[MilestoneOut.model_validate(m) for m in milestones],
+            last_updated=last_updated,
+        ),
         apps=await app_summaries(session),
     )
 
@@ -332,6 +342,257 @@ async def set_app_parent(
     return app
 
 
+# --- milestones ------------------------------------------------------------
+
+
+async def list_milestones(session: AsyncSession, app_id: int) -> list[Milestone]:
+    """One board's rules, earliest first. `position` is the whole order; id
+    breaks ties so the sequence is total even mid-renumber."""
+    return list(
+        (
+            await session.execute(
+                select(Milestone)
+                .where(Milestone.app_id == app_id)
+                .order_by(Milestone.position, Milestone.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def get_milestone(session: AsyncSession, milestone_id: int) -> Milestone:
+    milestone = await session.get(Milestone, milestone_id)
+    if milestone is None:
+        raise NotFoundError(f"No milestone with id {milestone_id}.")
+    return milestone
+
+
+async def _resolve_milestone(
+    session: AsyncSession, app_id: int, milestone_id: int | None
+) -> None:
+    """A task can only be dated by a line on its own board -- the same rule
+    edges follow, one axis over. Resolved rather than trusted, so an unknown id
+    is a 404 instead of a dangling FK that only shows up as a missing rule."""
+    if milestone_id is None:
+        return
+    milestone = await get_milestone(session, milestone_id)
+    if milestone.app_id != app_id:
+        raise GraphError(
+            f"{milestone.label!r} is a milestone on a different app. "
+            "A task is dated by its own board's lines."
+        )
+
+
+def _schedule_violation(
+    node_ids: list[int],
+    pairs: list[tuple[int, int]],
+    rank: dict[int, int],
+) -> tuple[int, int] | None:
+    """The first `(blocker, dependent)` pair whose dates run backwards, if any.
+
+    A dependency says "source finishes before target starts"; a milestone says
+    "this is done by that line". Together they leave exactly one rule: nothing a
+    task depends on -- directly or through any chain of dependencies -- may be
+    due after the task itself. A board that breaks it is not merely drawn badly,
+    it is a plan that cannot happen.
+
+    One pass in dependency order, carrying for each task the latest-dated task
+    anywhere upstream of it. Arriving at a dated task whose inherited date is
+    later than its own is the violation, and the carried id names the real
+    culprit -- which is what lets the message point several hops upstream rather
+    than at whichever edge happened to be touched last.
+
+    What is carried is `(position, hops)`: the latest line wins, and among
+    equally-late candidates the *nearest* one does. Without the hop count the
+    winner among ties is whatever the traversal reached first, so connecting two
+    tasks could be refused in the name of a third one further away that is due
+    on the same line -- true, but not the sentence someone needs.
+
+    `rank` holds only the dated tasks: an undated one carries whatever it
+    inherits but never fails on its own account, which is what makes "no date
+    committed" mean unconstrained rather than "sometime at the end".
+
+    The stored graph is always a DAG (`create_edge` refuses cycles), so the walk
+    drains. A cycle would leave nodes unvisited and report nothing, which is the
+    right deference -- the cycle is the bigger problem and is already refused.
+    """
+    outgoing: dict[int, list[int]] = defaultdict(list)
+    indegree = dict.fromkeys(node_ids, 0)
+    for source, target in pairs:
+        outgoing[source].append(target)
+        indegree[target] = indegree.get(target, 0) + 1
+
+    #: node -> `(position, hops, id)` of the latest-dated task strictly upstream,
+    #: nearest first among equals.
+    latest: dict[int, tuple[int, int, int]] = {}
+
+    def beats(candidate: tuple[int, int, int], held: tuple[int, int, int]) -> bool:
+        return candidate[0] > held[0] or (
+            candidate[0] == held[0] and candidate[1] < held[1]
+        )
+
+    ready = [node_id for node_id, count in indegree.items() if count == 0]
+    while ready:
+        current = ready.pop()
+        inherited = latest.get(current)
+        own = rank.get(current)
+        if own is not None and inherited is not None and inherited[0] > own:
+            return inherited[2], current
+
+        carried = inherited
+        mine = (own, 0, current) if own is not None else None
+        if mine is not None and (carried is None or beats(mine, carried)):
+            carried = mine
+        for following in outgoing.get(current, ()):
+            if carried is not None:
+                onward = (carried[0], carried[1] + 1, carried[2])
+                seen = latest.get(following)
+                if seen is None or beats(onward, seen):
+                    latest[following] = onward
+            indegree[following] -= 1
+            if indegree[following] == 0:
+                ready.append(following)
+    return None
+
+
+async def _assert_schedule(
+    session: AsyncSession,
+    app_id: int,
+    *,
+    extra_edge: tuple[int, int] | None = None,
+    node_milestone: tuple[int, int | None] | None = None,
+    positions: dict[int, int] | None = None,
+) -> None:
+    """Refuse a change that would make the board's own dates unsatisfiable.
+
+    Called with the change described rather than applied, so the refusal happens
+    before anything is written. Three things can introduce a violation and each
+    passes one keyword: a new dependency, a task moving to a different line, and
+    a line moving past another line. Everything else -- deleting an edge, a task
+    or a milestone, or appending a new milestone at the end -- can only relax the
+    constraint, so it is not checked.
+    """
+    milestones = await list_milestones(session, app_id)
+    position_of = {milestone.id: milestone.position for milestone in milestones}
+    if positions is not None:
+        position_of |= positions
+    label_of = {milestone.id: milestone.label for milestone in milestones}
+
+    nodes = (
+        (await session.execute(select(Node).where(Node.app_id == app_id))).scalars().all()
+    )
+    due = {node.id: node.milestone_id for node in nodes}
+    if node_milestone is not None:
+        due[node_milestone[0]] = node_milestone[1]
+
+    pairs = [
+        (edge.source_id, edge.target_id)
+        for edge in (
+            await session.execute(select(Edge).where(Edge.app_id == app_id))
+        ).scalars()
+    ]
+    if extra_edge is not None:
+        pairs.append(extra_edge)
+
+    rank = {
+        node_id: position_of[milestone_id]
+        for node_id, milestone_id in due.items()
+        if milestone_id is not None and milestone_id in position_of
+    }
+    clash = _schedule_violation([node.id for node in nodes], pairs, rank)
+    if clash is None:
+        return
+
+    by_id = {node.id: node for node in nodes}
+    blocker, dependent = by_id[clash[0]], by_id[clash[1]]
+    raise GraphError(
+        f"{dependent.title!r} is due by {label_of[due[dependent.id]]}, "
+        f"but it waits on {blocker.title!r}, which is not due until "
+        f"{label_of[due[blocker.id]]}. Nothing can depend on work scheduled "
+        "after it."
+    )
+
+
+async def create_milestone(
+    session: AsyncSession, app: App, *, label: str, due_on: date | None = None
+) -> Milestone:
+    """Add a rule to the end of the board's calendar.
+
+    Always appended, never sorted into place by its date. Nothing is due by it
+    yet, so a new last line cannot break any existing schedule -- and where it
+    belongs is a decision for whoever adds it, made explicitly afterwards with
+    `position`.
+    """
+    highest = await session.scalar(
+        select(func.max(Milestone.position)).where(Milestone.app_id == app.id)
+    )
+    milestone = Milestone(
+        app_id=app.id, label=label, due_on=due_on, position=(highest or 0) + 1
+    )
+    session.add(milestone)
+    await session.commit()
+    await session.refresh(milestone)
+    return milestone
+
+
+async def update_milestone(
+    session: AsyncSession, milestone_id: int, changes: dict[str, object]
+) -> Milestone:
+    """Rename, re-date, or move a rule.
+
+    `position` is an index into the board's run of milestones, not a stored
+    number to set: the run is re-sorted around the moved one and renumbered from
+    zero, so callers can say "third from the top" without knowing what the
+    numbers currently are.
+    """
+    milestone = await get_milestone(session, milestone_id)
+    fields = dict(changes)
+    position = fields.pop("position", None)
+
+    renumbered: dict[int, int] | None = None
+    if position is not None:
+        others = [
+            other
+            for other in await list_milestones(session, milestone.app_id)
+            if other.id != milestone.id
+        ]
+        index = max(0, min(int(position), len(others)))  # type: ignore[arg-type]
+        others.insert(index, milestone)
+        renumbered = {other.id: order for order, other in enumerate(others)}
+        # Checked before anything is assigned, so a refusal leaves the session
+        # exactly as it found it.
+        await _assert_schedule(session, milestone.app_id, positions=renumbered)
+
+    for field, value in fields.items():
+        setattr(milestone, field, value)
+    if renumbered is not None:
+        for other in await list_milestones(session, milestone.app_id):
+            other.position = renumbered[other.id]
+
+    await session.commit()
+    await session.refresh(milestone)
+    return milestone
+
+
+async def delete_milestone(session: AsyncSession, milestone_id: int) -> App:
+    """Delete a rule. The work due by it stays, undated.
+
+    The detach is written out rather than left to the FK's `ON DELETE SET NULL`
+    for the same reason `delete_parent` does it: the pragma fires in the
+    database, leaving any Node already loaded in this session holding a stale
+    `milestone_id` -- and the board is rebuilt from that session moments later.
+    """
+    milestone = await get_milestone(session, milestone_id)
+    app = await get_app_by_id(session, milestone.app_id)
+    await session.execute(
+        update(Node).where(Node.milestone_id == milestone.id).values(milestone_id=None)
+    )
+    await session.delete(milestone)
+    await session.commit()
+    return app
+
+
 # --- node mutations --------------------------------------------------------
 
 
@@ -363,9 +624,13 @@ async def create_node(
     detail: str | None,
     status: str,
     external_ref: str | None = None,
+    milestone_id: int | None = None,
 ) -> Node:
     if external_ref is not None:
         await _check_external_ref_free(session, app.id, external_ref)
+    # No schedule check: a task arrives with no dependencies either side of it,
+    # so whichever line it is dated by, there is nothing yet for it to contradict.
+    await _resolve_milestone(session, app.id, milestone_id)
     highest = await session.scalar(
         select(func.max(Node.sort_order)).where(Node.app_id == app.id)
     )
@@ -375,6 +640,7 @@ async def create_node(
         detail=detail,
         status=status,
         external_ref=external_ref,
+        milestone_id=milestone_id,
         sort_order=(highest or 0) + 1,
     )
     session.add(node)
@@ -393,6 +659,12 @@ async def update_node(
     if external_ref is not None:
         await _check_external_ref_free(
             session, node.app_id, external_ref, exclude_node_id=node.id
+        )
+    if "milestone_id" in changes:
+        milestone_id = changes["milestone_id"]
+        await _resolve_milestone(session, node.app_id, milestone_id)  # type: ignore[arg-type]
+        await _assert_schedule(
+            session, node.app_id, node_milestone=(node.id, milestone_id)  # type: ignore[arg-type]
         )
     for field, value in changes.items():
         setattr(node, field, value)
@@ -482,6 +754,10 @@ async def create_edge(
             "That connection would create a loop: "
             f"{target.title!r} already leads back to {source.title!r}."
         )
+
+    # Last, and only once the graph is known to stay acyclic: the schedule walk
+    # assumes a DAG, and a loop is the more fundamental complaint anyway.
+    await _assert_schedule(session, app.id, extra_edge=(source_id, target_id))
 
     edge = Edge(app_id=app.id, source_id=source_id, target_id=target_id)
     session.add(edge)

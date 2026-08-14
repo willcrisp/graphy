@@ -75,6 +75,23 @@ export interface AppMutation extends AppsPayload {
   app: AppInfo
 }
 
+/** A dated line drawn across one board: "everything above here by Q1".
+ *
+ *  `position` is the whole order, low to high -- `due_on` is shown but never
+ *  sorts, so a board can carry an undated "Beta" between two quarters (see
+ *  `models.Milestone`). Board-only: the overview has no milestones, because a
+ *  rule spanning six boards at once would cut through five other calendars. */
+export interface Milestone {
+  id: number
+  app_id: number
+  label: string
+  /** `YYYY-MM-DD`, or null for a line with no date yet. */
+  due_on: string | null
+  position: number
+  created_at: string
+  updated_at: string
+}
+
 export interface TaskNodeData {
   id: number
   app_id: number
@@ -84,6 +101,10 @@ export interface TaskNodeData {
   /** Opaque id from whatever external system created this task (e.g. a Jira
    *  key). Set by an importer, never by the UI -- read-only here. */
   external_ref: string | null
+  /** The milestone this task is due by, or null for "no date committed".
+   *  A null one is unconstrained: `canvas.ts` emits no ordering edge for it,
+   *  so layout puts it wherever its dependencies do, above or below any rule. */
+  milestone_id: number | null
   /** True for exactly one node per app: the root, standing in for the app
    *  itself. Created alongside the app, renamed only by renaming the app,
    *  and never created/edited/deleted through the ordinary task UI. */
@@ -104,6 +125,8 @@ export interface Graph {
   app: AppInfo
   nodes: TaskNodeData[]
   edges: GraphEdge[]
+  /** This board's dated lines, in `position` order. */
+  milestones: Milestone[]
   last_updated: string | null
 }
 
@@ -138,6 +161,13 @@ export interface NodeMutation extends Board {
 
 export interface EdgeMutation extends Board {
   edge: GraphEdge
+}
+
+/** A milestone belongs to one board and only re-shapes that board's sheet, so
+ *  unlike a parent project it answers with a `Board` and goes through the
+ *  ordinary optimistic patch-then-reconcile. */
+export interface MilestoneMutation extends Board {
+  milestone: Milestone
 }
 
 export interface AppConfig {

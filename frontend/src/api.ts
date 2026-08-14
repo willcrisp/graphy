@@ -10,6 +10,7 @@ import type {
   Board,
   EdgeMutation,
   Graph,
+  MilestoneMutation,
   NodeMutation,
   Overview,
   ParentMutation,
@@ -127,7 +128,13 @@ export const createNode = (
 
 export const updateNode = (
   id: number,
-  body: { title?: string; detail?: string | null; status?: Status },
+  body: {
+    title?: string
+    detail?: string | null
+    status?: Status
+    /** Explicit null takes the task off the calendar; absent leaves it alone. */
+    milestone_id?: number | null
+  },
 ) => request<NodeMutation>(`/nodes/${id}`, { method: 'PATCH', body: json(body) })
 
 export const deleteNode = (id: number) =>
@@ -141,3 +148,26 @@ export const createEdge = (key: string, source_id: number, target_id: number) =>
 
 export const deleteEdge = (id: number) =>
   request<Board>(`/edges/${id}`, { method: 'DELETE' })
+
+// Milestones answer with a board like tasks and edges do, not with an overview
+// like parent projects: a dated line belongs to one app and only re-shapes that
+// app's sheet.
+
+export const createMilestone = (
+  key: string,
+  body: { label: string; due_on?: string | null },
+) =>
+  request<MilestoneMutation>(`/apps/${key}/milestones`, {
+    method: 'POST',
+    body: json(body),
+  })
+
+export const updateMilestone = (
+  id: number,
+  /** `position` is an index into the board's run of lines, not a stored
+   *  number: the server re-sorts around the moved one and renumbers. */
+  body: { label?: string; due_on?: string | null; position?: number },
+) => request<MilestoneMutation>(`/milestones/${id}`, { method: 'PATCH', body: json(body) })
+
+export const deleteMilestone = (id: number) =>
+  request<Board>(`/milestones/${id}`, { method: 'DELETE' })

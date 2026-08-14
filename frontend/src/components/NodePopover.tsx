@@ -12,19 +12,26 @@ import { STATUS_GLYPH, STATUS_LABEL } from '../types'
 
 interface Props {
   task: CanvasNode
+  /** The label of the milestone this task is due by, or null when it carries
+   *  no date. Resolved by `App.tsx`, which holds the board's milestones. */
+  dueBy: string | null
   onClose: () => void
 }
 
-/** What stands in for the status line on the two node kinds that have none. */
+/** What stands in for the status line on the node kinds that have none. */
 const KIND_BLURB = {
   root: 'The app itself, at the top of the board.',
   parent: 'A parent project. The boards under it hang off this node.',
+  // Unreachable in practice -- the canvas marks rules unselectable, so a click
+  // never opens one. Kept so the kind list stays exhaustive rather than the
+  // lookup silently returning undefined if that ever changes.
+  milestone: 'A dated line. Everything above it is due by then.',
 } as const
 
 const MARGIN = 12
 const GAP = 10
 
-export default function NodePopover({ task, onClose }: Props) {
+export default function NodePopover({ task, dueBy, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [placed, setPlaced] = useState<{ x: number; y: number } | null>(null)
 
@@ -89,6 +96,10 @@ export default function NodePopover({ task, onClose }: Props) {
         {task.kind === 'task' ? (
           <>
             <p className="node-popover__detail">{task.detail || 'No detail recorded.'}</p>
+            {/* View mode is where someone comes to ask "when is this landing",
+                so the date sits next to the status rather than only in the
+                edit panel. Absent entirely when there is no date to give. */}
+            {dueBy ? <p className="node-popover__due mono">Due by {dueBy}</p> : null}
             <span className="node-popover__status" aria-hidden="true">
               <span className="node-popover__glyph">{STATUS_GLYPH[task.status]}</span>
               {STATUS_LABEL[task.status]}

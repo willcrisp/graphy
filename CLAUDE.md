@@ -128,16 +128,21 @@ board's response** — `loadOverview`.
 `canvas.ts` is what keeps `Graph.tsx` from knowing any of this. It flattens
 either page into one `CanvasGraph`:
 
-- `nodes` are `CanvasNode`s carrying a `kind` (`task` / `root` / `parent`).
-  `TaskNode.tsx` branches on that, never on `is_root`. A parent has no row in
-  `node`, so it is mapped into the node id space by `parentNodeId` — the same
-  trick as the synthetic edges, one decade lower.
+- `nodes` are `CanvasNode`s carrying a `kind` (`task` / `root` / `parent` /
+  `milestone`). `TaskNode.tsx` branches on that, never on `is_root`, and
+  `Graph.tsx` routes `milestone` to its own component. Neither a parent nor a
+  milestone has a row in `node`, so each is mapped into the node id space by
+  `parentNodeId` / `milestoneNodeId` — the same trick as the synthetic edges,
+  one decade lower each.
 - `edges` are the stored ones. `structural` are the computed joins: root to
   its top-level tasks, parent to the roots under it. Those are inert (no menu,
   no selection, nothing to delete) because there is no row behind them.
+  `ordering` is the third bucket and the odd one out — see "Milestones are a
+  layout constraint" below — it goes to layout and is never drawn at all.
 - `layoutGraph` no longer derives root edges itself. It takes **every** drawn
   edge, `structural` included, so layout and drawing cannot disagree about
-  which connections exist.
+  which connections exist. It also takes `ordering` on top of those, which is
+  the one edge list where layout knows something the drawing does not.
 
 Two ordering details make the overview lay out sanely, and both are no-ops on a
 single board: `layoutGraph` sorts nodes by `app_id` first (without it six
@@ -148,6 +153,53 @@ The overview mixes boards, so a node cannot inherit its board's accent from
 `.canvas` and carries `--accent` itself. `.task` is therefore in `tokens.css`'s
 `--accent-draw` derivation list — see the note there, and the accent warning
 under "Conventions that will bite you."
+
+### Milestones are a layout constraint, not a caption
+
+A `Milestone` row is a `label`, an optional `due_on`, and a `position`, belonging
+to one app. It draws as a **datum line** across the sheet: a chain rule with the
+label at the left, a per-status tally of the work due by it in the middle, and
+the date at the right. A task's `milestone_id` says which line it is due by.
+
+The load-bearing part is that the line is *drawn where the layout put it*, not
+where a caption says it is. `canvas.ts`'s `orderingEdgesOf` emits invisible edges
+— `task -> its line`, `previous line -> task`, `line -> next line`,
+`root -> first line` — which go into `layoutGraph` and nowhere else. Dagre then
+physically cannot rank a Q1 task below the Q1 rule. That is why `CanvasGraph` has
+a third edge bucket: `edges` are stored and drawn, `structural` are computed and
+drawn, `ordering` are computed and **never** drawn. Drawing an ordering edge
+would state as an arrow what the rule already states as a line.
+
+Milestones are laid out as nodes (`layoutGraph`'s `spans` set) so they get a rank
+from the same pass that positions the tasks, then stretched across the finished
+drawing's width on the way out. They go in with width 1 so they never push the
+horizontal packing around, and bounds are measured from the *non*-spanning nodes
+only — including a rule's own box would make it grow on every pass.
+
+**`milestone_id: null` means unconstrained, not "last".** An undated task gets no
+ordering edges and floats wherever its dependencies put it. This is what lets the
+feature be adopted a task at a time: adding a first milestone to a board full of
+undated work changes nothing until the work is dated.
+
+The invariant is in `services/graph.py` like every other one:
+**nothing may depend on work scheduled after it**, transitively. One topological
+pass (`_schedule_violation`) carries the latest-dated task upstream of each node;
+arriving at a dated task whose inherited date is later than its own is the
+violation. It is checked from the only three directions that can introduce one —
+adding an edge, moving a task to a different line, moving a line past another
+line — via `_assert_schedule`, which takes the change *described* rather than
+applied so a refusal leaves the session untouched. Deleting anything, and
+appending a new last milestone, can only relax it and are not checked.
+
+`position` is the whole ordering and is explicit: `create_milestone` **appends**,
+and `update_milestone`'s `position` is an index into the run, which is re-sorted
+and renumbered from zero around the moved one. `due_on` is shown and never sorts
+— a board may want an undated "Beta" between two quarters, and a date that
+disagrees with its neighbours should read as a mistake rather than silently
+re-sort the sheet under whoever typed it.
+
+`buildOverview` draws none of them, deliberately: a rule is a line across *a
+sheet*, and that page is six sheets side by side.
 
 ### Layout is computed, never persisted
 
@@ -272,6 +324,17 @@ avoid.
   server shapes flattened into the one `CanvasGraph` the canvas draws (see
   "Parent projects and the overview page"). A third thing to draw on that
   canvas is a third builder here, not a branch inside `Graph.tsx`.
+- **`canvas.ts`**'s synthetic id space — parent projects and milestones have
+  no row in `node`, so each is mapped into the node id space one decade
+  further down (`parentNodeId`, `milestoneNodeId`). With more than one kind
+  down there the `is*NodeId` tests must be *bounded ranges*, not "below the
+  base" — `inDecade` is that check. A fourth kind is another decade and
+  another pair of helpers.
+- **`.notice` in `App.tsx`** — where a refusal goes when no panel is open to
+  hold it. A rejected cycle, duplicate edge or backwards-through-a-milestone
+  dependency is a normal outcome here and each answers with a sentence worth
+  reading; without this, a refusal from a context menu (which selects
+  nothing) rolls the board back in silence.
 - **`totalOf(counts)`** in `types.ts` — sums a `StatusCounts`. Used by the
   tab strip, the delete-app confirmation, and the title block; summing the
   four fields by hand anywhere is a sign a fifth status will silently be
@@ -306,6 +369,12 @@ backfill, a NOT NULL) is a rebuild: bump `SCHEMA_VERSION` and re-seed with
 `--reset`. Do not grow that list into a migration system.
 
 ## Conventions that will bite you
+
+**A refusal must be able to reach the screen.** `runMutation` puts the server's
+sentence in `panelError`, which only renders inside `DetailPanel` /
+`ParentPanel`. Anything that can be refused from the canvas either selects a
+node first (as `connect` does) or relies on the `.notice` fallback — a new
+mutation that can 422 and does neither will roll back silently.
 
 **Status is defined in three places that must stay in sync:** the `CHECK` constraint
 in `models.py`, the `Status` Literal in `schemas.py` (which is what produces the 422
