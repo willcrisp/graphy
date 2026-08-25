@@ -26,6 +26,11 @@ const CHAR_WIDTH = 10.5
 const PADDING = 42
 const MIN_WIDTH = 84
 
+/** How far a milestone's rule overhangs the widest node on the sheet, each
+ *  side. Enough that the line reads as crossing the drawing rather than
+ *  stopping politely at its edge. */
+const SPAN_OVERHANG = 64
+
 export function nodeWidth(title: string): number {
   const raw = PADDING + title.length * CHAR_WIDTH
   return Math.max(MIN_WIDTH, Math.round(raw))
@@ -55,10 +60,19 @@ export interface Positioned {
  * `app_id` leads because the overview draws every board at once: without it,
  * six boards' `sort_order`s interleave and dagre shuffles the clusters
  * together. On a single board every `app_id` is equal, so it changes nothing.
+ *
+ * `spans` names the nodes that are drawn as a rule across the whole sheet
+ * rather than as a pill hugging a label -- milestones, today. They are ranked
+ * by dagre like anything else, which is the point: a milestone's y comes from
+ * the same pass that positions the tasks, so the line and the work cannot
+ * disagree about which side of it anything is on. They are given no width
+ * going *in*, so they never push the horizontal packing around, and are
+ * stretched across the finished drawing on the way out.
  */
 export function layoutGraph(
   nodes: TaskNodeData[],
   edges: GraphEdge[],
+  spans: ReadonlySet<number> = new Set(),
 ): Map<number, Positioned> {
   const graph = new dagre.graphlib.Graph()
   graph.setGraph({ rankdir: 'TB', ranksep: 110, nodesep: 64, marginx: 48, marginy: 48 })
@@ -68,7 +82,10 @@ export function layoutGraph(
     (a, b) => a.app_id - b.app_id || a.sort_order - b.sort_order || a.id - b.id,
   )
   for (const node of ordered) {
-    graph.setNode(String(node.id), { width: nodeWidth(node.title), height: NODE_HEIGHT })
+    graph.setNode(String(node.id), {
+      width: spans.has(node.id) ? 1 : nodeWidth(node.title),
+      height: NODE_HEIGHT,
+    })
   }
 
   const present = new Set(ordered.map((node) => node.id))
@@ -96,6 +113,22 @@ export function layoutGraph(
       height: laid.height,
     }
   })
+
+  // Stretch the spanning nodes across everything else, now that "everything
+  // else" has coordinates. Measured off the real nodes only: a rule that
+  // included its own width in the bounds would grow every time it was laid out.
+  const drawn = spans.size ? raw.filter((node) => !spans.has(node.id)) : []
+  // A sheet with nothing but rules on it has no bounds to span, and Math.min of
+  // nothing is Infinity -- leave those at the width dagre gave them.
+  if (drawn.length) {
+    const left = Math.min(...drawn.map((node) => node.x))
+    const right = Math.max(...drawn.map((node) => node.x + node.width))
+    for (const node of raw) {
+      if (!spans.has(node.id)) continue
+      node.x = left - SPAN_OVERHANG
+      node.width = right - left + SPAN_OVERHANG * 2
+    }
+  }
 
   // Rank = layout row, i.e. position along the axis dagre ranks on -- y, since
   // the graph runs top-to-bottom. Derived from the coordinate rather than read

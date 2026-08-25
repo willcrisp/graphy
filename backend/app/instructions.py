@@ -53,6 +53,11 @@ returns 403. Stop; there is nothing importable to do.
   *within its app*, meant for exactly this use case. Put the external
   tracker's id there (e.g. `"PROJ-123"`) and use it to recognise a task you
   already created, instead of matching on title.
+- **Milestone** -- a dated line across one board: `label` (e.g. `"Q1 2026"`),
+  optional `due_on` (a plain calendar date, `"2026-03-31"`), and `position`,
+  which is the order, low to high. A task's `milestone_id` says which line it
+  is due by; `null` means no date is committed, which is a normal state and
+  not an incomplete one.
 - **Edge** -- `source_id -> target_id`, directed. This means source must
   happen before target -- "target depends on source". Edges cannot cross
   apps, point a task at itself, duplicate an existing edge, or close a cycle;
@@ -60,6 +65,13 @@ returns 403. Stop; there is nothing importable to do.
   to be read, e.g. `"That connection would create a loop: 'A' already leads
   back to 'B'."` Treat a rejected edge as informational and move on to the
   next one rather than aborting the whole import.
+
+  One further rule involves both edges and milestones: **nothing may depend on
+  work scheduled after it.** If a task is due by Q1 and something it depends on
+  is due by Q2 -- directly or through a chain -- the edge is refused, because
+  that plan cannot happen. Undated tasks are exempt in both directions. This
+  bites an import that maps due dates and links in the same pass, so import the
+  links first and the dates second if the tracker's data disagrees with itself.
 
 ## Endpoints
 
@@ -73,8 +85,11 @@ returns 403. Stop; there is nothing importable to do.
 | `PATCH /api/parents/{{id}}` | Update one. Only the fields present are touched. |
 | `DELETE /api/parents/{{id}}` | Delete one. Its apps are detached, not deleted. |
 | `PUT /api/apps/{{key}}/parent` | Attach a board. `{{"parent_id": 3}}`, or `null` to detach. |
-| `GET /api/apps/{{key}}/graph` | Full board: app, all tasks, all edges. |
-| `POST /api/apps/{{key}}/nodes` | Create a task. `{{"title", "detail"?, "status", "external_ref"?}}`. |
+| `GET /api/apps/{{key}}/graph` | Full board: app, all tasks, all edges, all milestones. |
+| `POST /api/apps/{{key}}/milestones` | Create a milestone, appended last. `{{"label", "due_on"?}}`. |
+| `PATCH /api/milestones/{{id}}` | Update one. `position` is an *index* into the board's run, not a stored number. |
+| `DELETE /api/milestones/{{id}}` | Delete one. Tasks due by it survive, undated. |
+| `POST /api/apps/{{key}}/nodes` | Create a task. `{{"title", "detail"?, "status", "external_ref"?, "milestone_id"?}}`. |
 | `PATCH /api/nodes/{{id}}` | Update a task. Only the fields present are touched. |
 | `DELETE /api/nodes/{{id}}` | Delete a task. Its edges cascade; its dependents are not reparented. |
 | `POST /api/apps/{{key}}/edges` | Create an edge. `{{"source_id", "target_id"}}`. |
@@ -120,4 +135,28 @@ rather than duplicating them.
    `POST /api/apps/{{key}}/edges`. Skip links to tickets outside this project
    -- cross-app edges are always rejected. If an edge is rejected as a cycle,
    skip it and continue; do not treat it as fatal.
+
+## Importing dates
+
+Only if the tracker has a layer of *shared* dates -- fix versions, sprints,
+release trains, a quarter field. A per-ticket due date has nowhere to go here:
+milestones are lines several tasks sit above, not a field on a task.
+
+Milestones are per app and matched by `label`, so a re-run must reuse the
+existing row: read `milestones` from `GET /api/apps/{{key}}/graph`, match on
+label, and `POST` only if there is no match. Then `PATCH /api/nodes/{{id}}`
+with `milestone_id` for each ticket in that version.
+
+Two things to know before writing any of it:
+
+- New milestones are **appended**, never sorted into place by date. If the
+  tracker's versions have an order worth keeping, create them in that order, or
+  `PATCH` `position` afterwards -- it takes an index into the board's run
+  (0 is first) and the rest renumber around it.
+- A `PATCH` that dates a task is refused if it would put that task before
+  something it depends on (see the rule under **Edge** above). Import the
+  edges first, then the dates, and treat a refusal as informational: leave that
+  task undated and carry on rather than aborting the run. An undated task is a
+  normal state, and the refusal is usually telling you the tracker's own dates
+  and links disagree.
 """

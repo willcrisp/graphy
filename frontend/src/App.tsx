@@ -14,7 +14,7 @@ import ParentPanel from './components/ParentPanel'
 import SignIn from './components/SignIn'
 import ThemeToggle from './components/ThemeToggle'
 import TitleBlock from './components/TitleBlock'
-import { buildBoard, buildOverview, parentIdOf } from './canvas'
+import { buildBoard, buildOverview, milestoneIdOf, parentIdOf } from './canvas'
 import * as optimistic from './optimistic'
 import { withCounts } from './optimistic'
 import { useTheme } from './theme'
@@ -277,6 +277,21 @@ export default function App() {
     () => canvas?.nodes.find((node) => node.id === selectedId) ?? null,
     [canvas, selectedId],
   )
+
+  /** This board's dated lines, in order. Empty on the overview, which has no
+   *  calendar of its own -- see `buildOverview`. */
+  const milestones = useMemo(
+    () => (isOverview ? [] : graph?.milestones ?? []),
+    [isOverview, graph],
+  )
+
+  /** The label of the line the selected task is due by, for the popover. */
+  const selectedDueBy = useMemo(
+    () =>
+      milestones.find((milestone) => milestone.id === selected?.milestone_id)?.label ??
+      null,
+    [milestones, selected],
+  )
   const selectedParent = useMemo(() => {
     if (selected?.kind !== 'parent' || !overview) return null
     return overview.parents.find((p) => p.id === parentIdOf(selected.id)) ?? null
@@ -350,6 +365,7 @@ export default function App() {
     title?: string
     detail?: string | null
     status?: Status
+    milestone_id?: number | null
   }) {
     if (!selected) return
     const id = selected.id
@@ -392,6 +408,97 @@ export default function App() {
       (current) => optimistic.removeEdge(current, id),
       () => api.deleteEdge(id),
     )
+  }
+
+  // --- milestone actions ---------------------------------------------------
+  //
+  // These go through `runMutation` like tasks and edges do, and unlike the app-
+  // and parent-level actions below: a milestone belongs to one board and only
+  // re-shapes that board's sheet. It re-shapes a lot of it -- every dated task
+  // moves when a line does -- which is exactly why the patch is applied locally
+  // first. The alternative is a click, a pause, and then the whole sheet
+  // jumping at once.
+
+  function newMilestone() {
+    if (page?.kind !== 'board') return
+    const key = page.key
+    setDialog({
+      title: 'New milestone',
+      body:
+        'A line across the sheet. Tasks due by it are drawn above it, and ' +
+        'anything due by a later one below it. It goes at the bottom of the ' +
+        'board’s calendar; move it from its menu.',
+      label: 'Label',
+      placeholder: 'Q1 2026',
+      detailLabel: 'Date (optional)',
+      detailType: 'date',
+      confirmLabel: 'Add milestone',
+      onSubmit: async (label, due) => {
+        const body = { label, due_on: due || null }
+        await runMutation(
+          (current) =>
+            optimistic.insertMilestone(current, optimistic.draftMilestone(current, body)),
+          () => api.createMilestone(key, body),
+        )
+      },
+    })
+  }
+
+  function editMilestone(id: number) {
+    const milestone = milestones.find((candidate) => candidate.id === id)
+    if (!milestone) return
+    setDialog({
+      title: `Edit ${milestone.label}`,
+      label: 'Label',
+      initial: milestone.label,
+      detailLabel: 'Date (optional)',
+      detailInitial: milestone.due_on ?? '',
+      detailType: 'date',
+      confirmLabel: 'Save milestone',
+      onSubmit: async (label, due) => {
+        const changes = { label, due_on: due || null }
+        await runMutation(
+          (current) => optimistic.patchMilestone(current, id, changes),
+          () => api.updateMilestone(id, changes),
+        )
+      },
+    })
+  }
+
+  /** Move a line one place up or down the sheet. The server takes an index
+   *  into the run and renumbers around it, so this is "where it should end up",
+   *  not "what its number should become". */
+  function moveMilestone(id: number, by: -1 | 1) {
+    const at = milestones.findIndex((candidate) => candidate.id === id)
+    if (at < 0) return
+    const to = at + by
+    if (to < 0 || to >= milestones.length) return
+    void runMutation(
+      (current) => optimistic.patchMilestone(current, id, { position: to }),
+      () => api.updateMilestone(id, { position: to }),
+    )
+  }
+
+  function removeMilestone(id: number) {
+    const milestone = milestones.find((candidate) => candidate.id === id)
+    if (!milestone) return
+    const due = (graph?.nodes ?? []).filter((node) => node.milestone_id === id).length
+    setDialog({
+      title: `Delete ${milestone.label}?`,
+      body:
+        due === 0
+          ? 'Nothing is due by it. Only the line goes.'
+          : `Its ${due} task${due === 1 ? '' : 's'} stay — they go back to ` +
+            'having no date, and the board redraws around that.',
+      confirmLabel: 'Delete milestone',
+      danger: true,
+      onSubmit: async () => {
+        await runMutation(
+          (current) => optimistic.removeMilestone(current, id),
+          () => api.deleteMilestone(id),
+        )
+      },
+    })
   }
 
   // --- app- and parent-level actions --------------------------------------
@@ -560,6 +667,48 @@ export default function App() {
   function nodeMenu(id: number, x: number, y: number) {
     const node = canvas?.nodes.find((candidate) => candidate.id === id)
     if (!node) return
+
+    // A rule has nothing to open, so its menu is only its own actions and it
+    // skips the "Open details" item every other kind starts with. Right-click
+    // is the whole interface to a milestone: it is annotation, not work.
+    if (node.kind === 'milestone') {
+      if (!editingTasks) return
+      const milestoneId = milestoneIdOf(id)
+      const at = milestones.findIndex((candidate) => candidate.id === milestoneId)
+      setMenu({
+        x,
+        y,
+        heading: node.title,
+        groups: [
+          [{ label: 'Edit milestone…', mark: '✎', onSelect: () => editMilestone(milestoneId) }],
+          [
+            {
+              label: 'Move earlier',
+              mark: '↑',
+              disabled: at <= 0,
+              onSelect: () => moveMilestone(milestoneId, -1),
+            },
+            {
+              label: 'Move later',
+              mark: '↓',
+              disabled: at < 0 || at >= milestones.length - 1,
+              onSelect: () => moveMilestone(milestoneId, 1),
+            },
+            { label: 'New milestone…', mark: '+', onSelect: newMilestone },
+          ],
+          [
+            {
+              label: 'Delete milestone…',
+              mark: '×',
+              danger: true,
+              onSelect: () => removeMilestone(milestoneId),
+            },
+          ],
+        ],
+      })
+      return
+    }
+
     const groups: MenuItem[][] = [
       [{ label: 'Open details', mark: '›', onSelect: () => setSelectedId(id) }],
     ]
@@ -598,6 +747,11 @@ export default function App() {
               () => api.updateNode(id, { status }),
             ),
         })),
+      )
+      // Only offered once the board has a calendar. On a board with no lines
+      // there is no date to pick, and an empty submenu is worse than none.
+      if (milestones.length) groups.push(dueByChoices(node.id, node.milestone_id))
+      groups.push(
         [
           {
             label: 'Delete task',
@@ -615,6 +769,34 @@ export default function App() {
       )
     }
     setMenu({ x, y, heading: node.title, groups })
+  }
+
+  /** "Which line is this task due by" as a menu group: every milestone on the
+   *  board, plus taking it off the calendar, with the current one disabled.
+   *  The same shape as `parentChoices` one axis over. */
+  function dueByChoices(id: number, current: number | null): MenuItem[] {
+    return [
+      ...milestones.map((milestone) => ({
+        label: `Due by ${milestone.label}`,
+        mark: '│',
+        disabled: current === milestone.id,
+        onSelect: () =>
+          void runMutation(
+            (graph) => optimistic.patchNode(graph, id, { milestone_id: milestone.id }),
+            () => api.updateNode(id, { milestone_id: milestone.id }),
+          ),
+      })),
+      {
+        label: 'No date set',
+        mark: '—',
+        disabled: current === null,
+        onSelect: () =>
+          void runMutation(
+            (graph) => optimistic.patchNode(graph, id, { milestone_id: null }),
+            () => api.updateNode(id, { milestone_id: null }),
+          ),
+      },
+    ]
   }
 
   /** "Which parent project does this board hang off" as a menu group: every
@@ -702,7 +884,10 @@ export default function App() {
       groups: [
         isOverview
           ? [{ label: 'New parent project…', mark: '+', onSelect: newParent }]
-          : [{ label: 'Add task', mark: '+', onSelect: addNode }],
+          : [
+              { label: 'Add task', mark: '+', onSelect: addNode },
+              { label: 'New milestone…', mark: '│', onSelect: newMilestone },
+            ],
       ],
     })
   }
@@ -751,9 +936,14 @@ export default function App() {
           {canEdit ? (
             <>
               {editingTasks ? (
-                <button type="button" className="button button--primary" onClick={addNode}>
-                  Add task
-                </button>
+                <>
+                  <button type="button" className="button button--primary" onClick={addNode}>
+                    Add task
+                  </button>
+                  <button type="button" className="button" onClick={newMilestone}>
+                    Add milestone
+                  </button>
+                </>
               ) : null}
               {showEditing && isOverview ? (
                 <button type="button" className="button button--primary" onClick={newParent}>
@@ -806,6 +996,22 @@ export default function App() {
           parentCount={overview?.parents.length ?? 0}
           lastUpdated={(isOverview ? overview?.last_updated : graph?.last_updated) ?? null}
         />
+        {/* A refusal is a normal outcome here -- a cycle, a duplicate edge, a
+            dependency that would run backwards through a milestone -- and the
+            server's sentence is the whole explanation. The panel shows it when
+            one is open; without this, a refusal from a context menu (where
+            nothing gets selected) would roll the board back in silence. */}
+        {panelError && !panelled ? (
+          <button
+            type="button"
+            className="notice"
+            role="alert"
+            onClick={() => setPanelError(null)}
+          >
+            {panelError}
+            <span className="visually-hidden"> — dismiss</span>
+          </button>
+        ) : null}
       </main>
 
       {selectedParent && panelled ? (
@@ -833,6 +1039,7 @@ export default function App() {
           error={panelError}
           incoming={incoming}
           outgoing={outgoing}
+          milestones={milestones}
           onSave={saveSelected}
           onDelete={removeSelected}
           onDisconnect={disconnect}
@@ -842,7 +1049,12 @@ export default function App() {
       ) : null}
 
       {selected && usePopover ? (
-        <NodePopover key={selected.id} task={selected} onClose={() => setSelectedId(null)} />
+        <NodePopover
+          key={selected.id}
+          task={selected}
+          dueBy={selectedDueBy}
+          onClose={() => setSelectedId(null)}
+        />
       ) : null}
 
       {menu ? <ContextMenu menu={menu} onClose={() => setMenu(null)} /> : null}

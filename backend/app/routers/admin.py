@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, status
 
 from app.auth import require_admin, require_writable
 from app.deps import SessionDep
-from app.models import App, Edge, Node, Parent
+from app.models import App, Edge, Milestone, Node, Parent
 from app.schemas import (
     AppCreate,
     AppMutationOut,
@@ -28,6 +28,10 @@ from app.schemas import (
     EdgeCreate,
     EdgeMutationOut,
     EdgeOut,
+    MilestoneCreate,
+    MilestoneMutationOut,
+    MilestoneOut,
+    MilestoneUpdate,
     NodeCreate,
     NodeMutationOut,
     NodeOut,
@@ -72,6 +76,17 @@ async def _edge_mutation(session: SessionDep, app_key: str, edge: Edge) -> EdgeM
     board = await service.get_board(session, app_key)
     return EdgeMutationOut(
         edge=EdgeOut.model_validate(edge), graph=board.graph, apps=board.apps
+    )
+
+
+async def _milestone_mutation(
+    session: SessionDep, app_key: str, milestone: Milestone
+) -> MilestoneMutationOut:
+    board = await service.get_board(session, app_key)
+    return MilestoneMutationOut(
+        milestone=MilestoneOut.model_validate(milestone),
+        graph=board.graph,
+        apps=board.apps,
     )
 
 
@@ -152,6 +167,7 @@ async def create_node(key: str, body: NodeCreate, session: SessionDep) -> NodeMu
         detail=body.detail,
         status=body.status,
         external_ref=body.external_ref,
+        milestone_id=body.milestone_id,
     )
     return await _node_mutation(session, app.key, node)
 
@@ -169,6 +185,39 @@ async def update_node(
 @router.delete("/nodes/{node_id}", response_model=BoardOut)
 async def delete_node(node_id: int, session: SessionDep) -> BoardOut:
     app = await service.delete_node(session, node_id)
+    return await service.get_board(session, app.key)
+
+
+@router.post(
+    "/apps/{key}/milestones",
+    response_model=MilestoneMutationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_milestone(
+    key: str, body: MilestoneCreate, session: SessionDep
+) -> MilestoneMutationOut:
+    """Add a dated line to the end of this board's calendar."""
+    app = await service.get_app(session, key)
+    milestone = await service.create_milestone(
+        session, app, label=body.label, due_on=body.due_on
+    )
+    return await _milestone_mutation(session, app.key, milestone)
+
+
+@router.patch("/milestones/{milestone_id}", response_model=MilestoneMutationOut)
+async def update_milestone(
+    milestone_id: int, body: MilestoneUpdate, session: SessionDep
+) -> MilestoneMutationOut:
+    changes = body.model_dump(exclude_unset=True)
+    milestone = await service.update_milestone(session, milestone_id, changes)
+    app = await service.get_app_by_id(session, milestone.app_id)
+    return await _milestone_mutation(session, app.key, milestone)
+
+
+@router.delete("/milestones/{milestone_id}", response_model=BoardOut)
+async def delete_milestone(milestone_id: int, session: SessionDep) -> BoardOut:
+    """Delete a line. Tasks due by it survive, undated."""
+    app = await service.delete_milestone(session, milestone_id)
     return await service.get_board(session, app.key)
 
 

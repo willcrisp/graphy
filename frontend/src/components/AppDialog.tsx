@@ -6,7 +6,9 @@ import Modal from './Modal'
  *  takes its whole graph with it, which is the one destructive action worth a
  *  stop. `detailLabel` adds a second, optional field: a parent project is a
  *  name *and* a description, and asking for both at once beats creating it
- *  blank and immediately editing it. */
+ *  blank and immediately editing it. `detailType` switches that second field
+ *  between a paragraph and a date -- a milestone is a label *and* a day, which
+ *  is the same "ask for both at once" shape one field type over. */
 export interface DialogSpec {
   title: string
   body?: string
@@ -16,6 +18,7 @@ export interface DialogSpec {
   detailLabel?: string
   detailInitial?: string
   detailPlaceholder?: string
+  detailType?: 'text' | 'date'
   confirmLabel: string
   danger?: boolean
   onSubmit: (value: string, detail: string) => Promise<void>
@@ -93,14 +96,23 @@ export default function AppDialog({ dialog, onClose }: Props) {
         {dialog.detailLabel ? (
           <label className="field">
             <span className="field__label mono">{dialog.detailLabel}</span>
-            <textarea
-              className="field__input field__input--area"
-              value={detail}
-              rows={4}
-              maxLength={2000}
-              placeholder={dialog.detailPlaceholder}
-              onChange={(event) => setDetail(event.target.value)}
-            />
+            {dialog.detailType === 'date' ? (
+              <input
+                type="date"
+                className="field__input"
+                value={detail}
+                onChange={(event) => setDetail(event.target.value)}
+              />
+            ) : (
+              <textarea
+                className="field__input field__input--area"
+                value={detail}
+                rows={4}
+                maxLength={2000}
+                placeholder={dialog.detailPlaceholder}
+                onChange={(event) => setDetail(event.target.value)}
+              />
+            )}
           </label>
         ) : null}
         {error ? (

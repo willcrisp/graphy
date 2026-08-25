@@ -12,9 +12,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
+import MilestoneNode from './MilestoneNode'
 import TaskNode from './TaskNode'
-import type { CanvasGraph } from '../canvas'
+import type { CanvasGraph, CanvasNode } from '../canvas'
 import { layoutGraph } from '../layout'
+import { totalOf } from '../types'
 
 /** The React Flow canvas: turns a `CanvasGraph` (see `canvas.ts`) plus a
  *  computed `layoutGraph` position into React Flow nodes/edges, and forwards
@@ -24,7 +26,7 @@ import { layoutGraph } from '../layout'
  *  It does not know whether it is drawing one board or the overview of all of
  *  them: `canvas.ts` flattens both into the same shape first. */
 
-const nodeTypes = { task: TaskNode }
+const nodeTypes = { task: TaskNode, milestone: MilestoneNode }
 const fitViewOptions = { padding: 0.2 }
 
 /** Marker arrowheads live in an SVG <defs> outside the cascade React Flow's
@@ -38,6 +40,26 @@ const WIP_MARKER_COLOR = '#a78bfa'
  *  swoop rather than a stiff diagonal, while nodes stacked directly below
  *  their parent still draw as a near-straight line. */
 const EDGE_CURVATURE = 0.32
+
+/** What a screen reader announces for a node. The kinds that are not tasks say
+ *  what they are; a milestone also says what it is for, because a bare
+ *  "Q1 2026, milestone" leaves out the only thing the line means. */
+function ariaLabelOf(task: CanvasNode): string {
+  switch (task.kind) {
+    case 'task':
+      return `${task.title}, ${task.status}`
+    case 'parent':
+      return `${task.title}, parent project`
+    case 'root':
+      return `${task.title}, board`
+    case 'milestone': {
+      const due = task.mark?.due_on
+      return `${task.title}, milestone${due ? ` due ${due}` : ''}, ${
+        totalOf(task.mark?.counts ?? { done: 0, wip: 0, todo: 0, blocked: 0 })
+      } tasks due by it`
+    }
+  }
+}
 
 interface Props {
   graph: CanvasGraph
@@ -68,26 +90,34 @@ export default function Graph({
 
   const { nodes, edges } = useMemo(() => {
     // Layout and drawing take the same edge list, computed joins included --
-    // see `layoutGraph`'s note on why it no longer derives its own.
+    // see `layoutGraph`'s note on why it no longer derives its own. The
+    // ordering edges go to layout and nowhere else: they are what holds a task
+    // on its own side of a milestone, and drawing them would state as an arrow
+    // what the rule already states as a line.
     const drawn = [...graph.edges, ...graph.structural]
-    const positions = layoutGraph(graph.nodes, drawn)
+    const spans = new Set(
+      graph.nodes.flatMap((task) => (task.kind === 'milestone' ? [task.id] : [])),
+    )
+    const positions = layoutGraph(graph.nodes, [...drawn, ...graph.ordering], spans)
     const byId = new Map(graph.nodes.map((task) => [task.id, task]))
     const flowNodes: Node[] = graph.nodes.flatMap((task) => {
       const position = positions.get(task.id)
       if (!position) return []
+      const milestone = task.kind === 'milestone'
       return [
         {
           id: String(task.id),
-          type: 'task',
+          type: milestone ? 'milestone' : 'task',
           position: { x: position.x, y: position.y },
           width: position.width,
           height: position.height,
           selected: task.id === selectedId,
+          // A rule is annotation, not a thing to open: it is edited through its
+          // context menu, so a left click on it selects nothing rather than
+          // opening a panel that has no task to show.
+          selectable: !milestone,
           data: { task, editable: editMode, rank: position.rank },
-          ariaLabel:
-            task.kind === 'task'
-              ? `${task.title}, ${task.status}`
-              : `${task.title}, ${task.kind === 'parent' ? 'parent project' : 'board'}`,
+          ariaLabel: ariaLabelOf(task),
         },
       ]
     })
@@ -177,7 +207,10 @@ export default function Graph({
       minZoom={0.2}
       maxZoom={1.6}
       proOptions={{ hideAttribution: false }}
-      onNodeClick={(_event, node) => onSelect(Number(node.id))}
+      onNodeClick={(_event, node) => {
+        if (node.type === 'milestone') return
+        onSelect(Number(node.id))
+      }}
       onPaneClick={() => onSelect(null)}
       onNodeContextMenu={(event, node) => {
         event.preventDefault()

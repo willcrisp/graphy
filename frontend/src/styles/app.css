@@ -529,6 +529,139 @@
   stroke-dasharray: 2 4;
 }
 
+/* --- milestone rule ------------------------------------------------------
+   A dated line across the sheet. Laid out as a node (layout.ts stretches it to
+   the drawing's width) and drawn as a chain rule -- long dash, short dash --
+   which is the drafting convention for a datum, exactly what this is: the
+   reference everything above it is measured against.
+
+   Quiet by default. It is a constraint on the drawing, not part of it, so it
+   sits at --rule-strong and lets the nodes keep the ink. */
+
+.datum {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--ink-mute);
+  animation: task-settle var(--motion) var(--ease) both;
+  animation-delay: var(--stagger, 0ms);
+}
+
+/* The rule itself, as a background rather than a border: a chain line needs a
+   two-length dash pattern, which border-style cannot express. Centred in a
+   1px-tall strip so the gradient's own height does not thicken it. */
+.datum__rule {
+  flex: 1 1 auto;
+  min-width: var(--s5);
+  height: 1px;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--rule-strong) 0 10px,
+    transparent 10px 15px,
+    var(--rule-strong) 15px 18px,
+    transparent 18px 23px
+  );
+}
+
+.datum__label {
+  flex: 0 0 auto;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.datum__due,
+.datum__tally {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.datum__tally {
+  display: flex;
+  gap: var(--s3);
+}
+
+.datum__count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+/* Same pairing as everywhere else: the glyph is drawn, the number is text, so
+   the number takes the -ink variant and the glyph the drawing colour. */
+.datum__count--done {
+  color: var(--st-done);
+}
+.datum__count--wip {
+  color: var(--st-wip-ink);
+}
+.datum__count--todo {
+  color: var(--st-todo-ink);
+}
+.datum__count--blocked {
+  color: var(--st-blocked);
+}
+
+/* The one place the drawing raises its voice. A date that has passed with work
+   still open is the single fact this feature exists to surface, so the whole
+   rule goes to --st-blocked -- and the label says "Overdue" in words, because
+   colour never carries meaning alone here. */
+.datum--overdue {
+  color: var(--st-blocked);
+}
+
+.datum--overdue .datum__label,
+.datum--overdue .datum__due {
+  color: var(--st-blocked);
+}
+
+.datum--overdue .datum__rule {
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--st-blocked) 0 10px,
+    transparent 10px 15px,
+    var(--st-blocked) 15px 18px,
+    transparent 18px 23px
+  );
+}
+
+/* --- canvas notice ------------------------------------------------------
+   Where a refusal goes when no panel is open to hold it. Rejecting a cycle, a
+   duplicate connection or a dependency that runs backwards through a milestone
+   is a normal outcome here, and each answers with a sentence worth reading --
+   so it is drawn as a note pinned to the drawing, top-centre, clear of both
+   the controls (bottom-left) and the title block (bottom-right).
+
+   A button, not a div: it is dismissed by clicking it, and that has to be
+   reachable from the keyboard like anything else. */
+
+.notice {
+  position: absolute;
+  top: var(--s5);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  max-width: min(56ch, calc(100% - var(--s6) * 2));
+  margin: 0;
+  padding: var(--s2) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--st-blocked);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--t-small);
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notice:hover {
+  background: var(--ground);
+}
+
 /* --- empty state ------------------------------------------------------- */
 
 .empty {
@@ -826,6 +959,19 @@
   resize: vertical;
   line-height: 1.5;
   min-height: 96px;
+}
+
+/* The date field's native picker indicator is drawn by the browser and is
+   near-invisible on the dark ground; inverting it is the one hook there is. */
+[data-theme='dark'] .field__input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+/* Kept as the platform control -- a hand-rolled listbox would have to
+   re-implement keyboard behaviour that already works. Only the arrow needs
+   help: `appearance: none` would take the field's own border with it. */
+.field__input--select {
+  padding-right: var(--s5);
 }
 
 .statuspick {
@@ -1150,6 +1296,11 @@
   color: var(--ink-mute);
   font-size: var(--t-small);
   line-height: 1.5;
+}
+
+.node-popover__due {
+  margin: 0;
+  color: var(--ink-mute);
 }
 
 .node-popover__status {

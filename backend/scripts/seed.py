@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -18,7 +19,7 @@ from sqlalchemy import delete, select  # noqa: E402
 
 from app.config import ConfigError, load_settings  # noqa: E402
 from app.db import Database  # noqa: E402
-from app.models import App, Edge, Node, Parent  # noqa: E402
+from app.models import App, Edge, Milestone, Node, Parent  # noqa: E402
 
 # Parent projects, and which app keys hang off each. Two of the six apps are
 # deliberately left standalone -- an app is not required to have a parent, and
@@ -208,6 +209,32 @@ SEED: list[tuple[str, str, str, list[tuple[str, str, str, str | None]], list[tup
     ("tessellate", "Tessellate", "#6B2F5B", [], []),
 ]
 
+# Milestones, keyed by app key: (label, due date or None, the local task ids due
+# by that line). Only two of the six boards get a calendar -- a board without one
+# is the normal case, and both pages have to look right when most of them have
+# no dates at all.
+#
+# Between them the two cover every state the rule can be in: a line that was met,
+# a dated line with work still open under it (drawn overdue once its date has
+# passed), a line still ahead of its date, and an undated one.
+#
+# Every dependency here runs forwards through the calendar, because the service
+# refuses any that doesn't -- see `_assert_schedule`. Re-check that if you move a
+# task between lines.
+SEED_MILESTONES: dict[str, list[tuple[str, date | None, list[str]]]] = {
+    "atmosphere": [
+        ("Q1 2026", date(2026, 3, 31), ["ingest", "calib", "export"]),
+        ("Q2 2026", date(2026, 6, 30), ["alerts", "digest", "mobile"]),
+        ("Q3 2026", date(2026, 9, 30), ["anomaly", "forecast"]),
+    ],
+    "lattice": [
+        # Undated on purpose: a milestone is a checkpoint first and a date
+        # second, and the board should read fine before anyone commits to one.
+        ("Beta", None, ["schema", "validate", "index", "query"]),
+        ("GA", date(2026, 12, 31), ["migrate", "replica", "console"]),
+    ],
+}
+
 
 async def main() -> int:
     reset = "--reset" in sys.argv[1:]
@@ -241,6 +268,7 @@ async def main() -> int:
             )
 
             ids: dict[str, int] = {}
+            rows: dict[str, Node] = {}
             for position, (local, title, node_status, detail) in enumerate(nodes):
                 node = Node(
                     app_id=app.id,
@@ -252,14 +280,28 @@ async def main() -> int:
                 session.add(node)
                 await session.flush()
                 ids[local] = node.id
+                rows[local] = node
 
             for source, target in edges:
                 session.add(
                     Edge(app_id=app.id, source_id=ids[source], target_id=ids[target])
                 )
 
+            milestones = SEED_MILESTONES.get(key, [])
+            for position, (label, due_on, due) in enumerate(milestones):
+                milestone = Milestone(
+                    app_id=app.id, label=label, due_on=due_on, position=position
+                )
+                session.add(milestone)
+                await session.flush()
+                for local in due:
+                    rows[local].milestone_id = milestone.id
+
             await session.commit()
-            print(f"seed: {key} - {len(nodes)} nodes, {len(edges)} edges")
+            print(
+                f"seed: {key} - {len(nodes)} nodes, {len(edges)} edges, "
+                f"{len(milestones)} milestones"
+            )
 
         # Attached after the apps rather than alongside them, so a re-run that
         # skipped every app still fixes up parents that were never linked.
