@@ -6,6 +6,13 @@ For the full REST endpoint/schema reference, see [`docs/API.md`](docs/API.md) ra
 than duplicating it here. Non-Claude tooling that looks for `AGENTS.md` finds a
 pointer back to this file at [`AGENTS.md`](AGENTS.md).
 
+## Branching
+
+**Work on `main` only.** Do not create feature branches, and do not open pull
+requests for work in this repo — commit directly to `main`. If a branch already
+exists (or you are handed one), merge it into `main` and continue there rather
+than adding commits to it.
+
 ## Commands
 
 All backend commands run from `backend/`, all frontend commands from `frontend/`.
